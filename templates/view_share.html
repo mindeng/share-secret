@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}查看分享 - Share Secret{% endblock %}
+
+{% block content %}
+<h1>查看分享</h1>
+<div id="loading">正在加载...</div>
+<div id="error" style="display:none; color: red;"></div>
+<div id="content" style="display:none;">
+    <h2 id="title"></h2>
+    <table>
+        <tbody id="fields"></tbody>
+    </table>
+</div>
+
+<script src="/static/crypto.js"></script>
+<script>
+    (async () => {
+        const hash = window.location.hash;
+        const keyMatch = hash.match(/^#key=(.+)$/);
+        if (!keyMatch) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').textContent = '链接不完整，缺少解密密钥';
+            document.getElementById('error').style.display = 'block';
+            return;
+        }
+
+        const key = keyMatch[1];
+        const slug = window.location.pathname.split('/').pop();
+
+        try {
+            const res = await fetch(`/api/shares/${slug}`);
+            if (!res.ok) throw new Error('分享不存在');
+            const data = await res.json();
+            const payload = await decryptPayload(key, data.encrypted_payload);
+
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            document.getElementById('title').textContent = payload.title;
+
+            const tbody = document.getElementById('fields');
+            payload.fields.forEach(field => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(field.label)}</td>
+                    <td><input type="text" value="${escapeHtml(field.value)}" readonly></td>
+                    <td><button class="copy-btn">复制</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.querySelectorAll('.copy-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const input = btn.closest('tr').querySelector('input');
+                    navigator.clipboard.writeText(input.value).then(() => {
+                        btn.textContent = '已复制';
+                        setTimeout(() => btn.textContent = '复制', 1500);
+                    });
+                });
+            });
+        } catch (e) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').textContent = '无法解密，请检查链接是否完整';
+            document.getElementById('error').style.display = 'block';
+        }
+    })();
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+</script>
+{% endblock %}
