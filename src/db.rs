@@ -1,11 +1,16 @@
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::SqlitePool;
 use std::env;
+use std::str::FromStr;
 
 pub async fn init_db() -> SqlitePool {
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:share_secret.db".to_string());
+    let options = SqliteConnectOptions::from_str(&database_url)
+        .expect("invalid DATABASE_URL")
+        .create_if_missing(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&database_url)
+        .connect_with(options)
         .await
         .expect("failed to connect to sqlite");
 
