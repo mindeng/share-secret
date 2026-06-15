@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}登录 - Share Secret{% endblock %}
+
+{% block content %}
+<h1>登录</h1>
+{% if let Some(error) = error %}
+<p style="color: red;">{{ error }}</p>
+{% endif %}
+<form method="post" action="/login">
+    <label>用户名 <input type="text" name="username" required></label>
+    <label>密码 <input type="password" name="password" required></label>
+    <button type="submit">登录</button>
+</form>
+<p>没有账号？<a href="/register">注册</a></p>
+{% endblock %}
