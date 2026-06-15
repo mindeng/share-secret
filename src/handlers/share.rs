@@ -13,9 +13,7 @@ pub struct NewShareTemplate;
 
 #[derive(Template)]
 #[template(path = "view_share.html")]
-pub struct ViewShareTemplate {
-    pub slug: String,
-}
+pub struct ViewShareTemplate;
 
 #[derive(Serialize)]
 pub struct SharePayloadResponse {
@@ -77,8 +75,8 @@ pub async fn delete_share() -> Html<&'static str> {
     Html("")
 }
 
-pub async fn view_share(Path(slug): Path<String>) -> Result<Html<String>, AppError> {
-    Ok(Html(ViewShareTemplate { slug }.render()?))
+pub async fn view_share(Path(_slug): Path<String>) -> Result<Html<String>, AppError> {
+    Ok(Html(ViewShareTemplate.render()?))
 }
 
 pub async fn get_share_payload(
