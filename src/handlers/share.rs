@@ -3,7 +3,7 @@ use crate::crypto::generate_slug;
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
-use axum::{extract::{Path, State}, response::Html, Json};
+use axum::{extract::{Path, State}, response::{Html, Redirect}, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -71,8 +71,22 @@ pub async fn create_share(
     Ok(Json(CreateShareResponse { slug }))
 }
 
-pub async fn delete_share() -> Html<&'static str> {
-    Html("")
+pub async fn delete_share(
+    State(state): State<Arc<AppState>>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<i64>,
+) -> Result<Redirect, AppError> {
+    let result = sqlx::query("DELETE FROM shares WHERE id = ? AND user_id = ?")
+        .bind(id)
+        .bind(user.id)
+        .execute(&state.db)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Forbidden);
+    }
+
+    Ok(Redirect::to("/dashboard"))
 }
 
 pub async fn view_share(Path(_slug): Path<String>) -> Result<Html<String>, AppError> {

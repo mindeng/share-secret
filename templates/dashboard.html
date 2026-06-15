@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}我的分享 - Share Secret{% endblock %}
+
+{% block content %}
+<h1>我的分享</h1>
+<p><a href="/shares/new">创建新分享</a></p>
+
+{% if shares.is_empty() %}
+<p>暂无分享</p>
+{% else %}
+<ul style="list-style: none; padding: 0;">
+    {% for share in shares %}
+    <li style="background: white; padding: 1rem; border-radius: 8px; margin-bottom: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;">
+        <code style="word-break: break-all;">/s/{{ share.slug }}</code>
+        <span style="color: #666; font-size: 0.875rem;">创建于 {{ share.created_at }}</span>
+        <form method="post" action="/api/shares/{{ share.id }}/delete" style="margin-left: auto;" onsubmit="return confirm('确定删除？');">
+            <button type="submit" style="width: auto;">删除</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+
+<form method="post" action="/logout" style="margin-top: 2rem;">
+    <button type="submit">登出</button>
+</form>
+{% endblock %}
