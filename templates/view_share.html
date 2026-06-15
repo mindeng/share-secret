@@ -13,62 +13,110 @@
     </table>
 </div>
 
+<div id="password-prompt" style="display:none; background:white; padding:1rem; border-radius:8px;">
+    <p>此分享受密码保护，请输入查看密码：</p>
+    <label><input type="password" id="view-password" autocomplete="off"></label>
+    <button id="unlock-btn">解锁</button>
+    <p id="password-error" style="color:red; display:none;">密码错误，请重试</p>
+</div>
+
 <script src="/static/crypto.js"></script>
 <script>
+    const slug = window.location.pathname.split('/').pop();
+
+    function showError(msg) {
+        document.getElementById('loading').style.display = 'none';
+        const el = document.getElementById('error');
+        el.textContent = msg;
+        el.style.display = 'block';
+    }
+
+    function renderPayload(payload) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('password-prompt').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+        document.getElementById('title').textContent = payload.title;
+
+        const tbody = document.getElementById('fields');
+        tbody.replaceChildren();
+        payload.fields.forEach(field => {
+            const tr = document.createElement('tr');
+
+            const labelTd = document.createElement('td');
+            labelTd.textContent = field.label;
+
+            const valueTd = document.createElement('td');
+            const valueInput = document.createElement('input');
+            valueInput.type = 'text';
+            valueInput.value = field.value;
+            valueInput.readOnly = true;
+            valueTd.appendChild(valueInput);
+
+            const btnTd = document.createElement('td');
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'copy-btn';
+            copyBtn.textContent = '复制';
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(valueInput.value).then(() => {
+                    copyBtn.textContent = '已复制';
+                    setTimeout(() => { copyBtn.textContent = '复制'; }, 1500);
+                });
+            });
+            btnTd.appendChild(copyBtn);
+
+            tr.appendChild(labelTd);
+            tr.appendChild(valueTd);
+            tr.appendChild(btnTd);
+            tbody.appendChild(tr);
+        });
+    }
+
     (async () => {
-        const hash = window.location.hash;
-        const keyMatch = hash.match(/^#key=(.+)$/);
-        if (!keyMatch) {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('error').textContent = '链接不完整，缺少解密密钥';
-            document.getElementById('error').style.display = 'block';
-            return;
-        }
-
-        const key = keyMatch[1];
-        const slug = window.location.pathname.split('/').pop();
-
+        let data;
         try {
             const res = await fetch(`/api/shares/${slug}`);
             if (!res.ok) throw new Error('分享不存在');
-            const data = await res.json();
-            const payload = await decryptPayload(key, data.encrypted_payload);
-
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('content').style.display = 'block';
-            document.getElementById('title').textContent = payload.title;
-
-            const tbody = document.getElementById('fields');
-            payload.fields.forEach(field => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td>${escapeHtml(field.label)}</td>
-                    <td><input type="text" value="${escapeHtml(field.value)}" readonly></td>
-                    <td><button class="copy-btn">复制</button></td>
-                `;
-                tbody.appendChild(tr);
-            });
-
-            document.querySelectorAll('.copy-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const input = btn.closest('tr').querySelector('input');
-                    navigator.clipboard.writeText(input.value).then(() => {
-                        btn.textContent = '已复制';
-                        setTimeout(() => btn.textContent = '复制', 1500);
-                    });
-                });
-            });
+            data = await res.json();
         } catch (e) {
+            showError('分享不存在或已被删除');
+            return;
+        }
+
+        if (data.kdf_salt) {
             document.getElementById('loading').style.display = 'none';
-            document.getElementById('error').textContent = '无法解密，请检查链接是否完整';
-            document.getElementById('error').style.display = 'block';
+            document.getElementById('password-prompt').style.display = 'block';
+
+            const unlock = async () => {
+                const password = document.getElementById('view-password').value;
+                document.getElementById('password-error').style.display = 'none';
+                try {
+                    const cryptoKey = await deriveKeyFromPassword(password, data.kdf_salt);
+                    const payload = await decryptWithKey(cryptoKey, data.encrypted_payload);
+                    renderPayload(payload);
+                } catch (e) {
+                    document.getElementById('password-error').style.display = 'block';
+                }
+            };
+
+            document.getElementById('unlock-btn').addEventListener('click', unlock);
+            document.getElementById('view-password').addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') unlock();
+            });
+            return;
+        }
+
+        const keyMatch = window.location.hash.match(/^#key=(.+)$/);
+        if (!keyMatch) {
+            showError('链接不完整，缺少解密密钥');
+            return;
+        }
+        try {
+            const cryptoKey = await importRawKey(keyMatch[1]);
+            const payload = await decryptWithKey(cryptoKey, data.encrypted_payload);
+            renderPayload(payload);
+        } catch (e) {
+            showError('无法解密，请检查链接是否完整');
         }
     })();
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 </script>
 {% endblock %}
