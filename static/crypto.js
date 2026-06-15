@@ -25,7 +25,7 @@ async function deriveKeyFromPassword(password, saltB64) {
         ['deriveKey']
     );
     return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: b64ToBytes(saltB64), iterations: 200000, hash: 'SHA-256' },
+        { name: 'PBKDF2', salt: b64ToBytes(saltB64), iterations: 600000, hash: 'SHA-256' },
         baseKey,
         { name: 'AES-GCM', length: 256 },
         false,
