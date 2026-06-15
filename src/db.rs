@@ -28,6 +28,7 @@ pub async fn init_db() -> SqlitePool {
             user_id INTEGER NOT NULL,
             slug TEXT UNIQUE NOT NULL,
             encrypted_payload TEXT NOT NULL,
+            kdf_salt TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -36,6 +37,11 @@ pub async fn init_db() -> SqlitePool {
     .execute(&pool)
     .await
     .expect("failed to create tables");
+
+    // 迁移旧数据库：若 kdf_salt 列不存在则补上（已存在会报错，忽略即可）
+    let _ = sqlx::query("ALTER TABLE shares ADD COLUMN kdf_salt TEXT")
+        .execute(&pool)
+        .await;
 
     pool
 }
@@ -61,6 +67,7 @@ pub async fn init_db_memory() -> SqlitePool {
             user_id INTEGER NOT NULL,
             slug TEXT UNIQUE NOT NULL,
             encrypted_payload TEXT NOT NULL,
+            kdf_salt TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );

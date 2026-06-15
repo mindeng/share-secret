@@ -13,6 +13,7 @@ pub struct Share {
     pub user_id: i64,
     pub slug: String,
     pub encrypted_payload: String,
+    pub kdf_salt: Option<String>,
     pub created_at: String,
 }
 

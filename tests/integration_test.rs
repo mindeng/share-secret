@@ -83,6 +83,7 @@ async fn test_create_and_fetch_share() {
     let body = body_string(res.into_body()).await;
     let fetched: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(fetched["encrypted_payload"].as_str(), Some("testpayload"));
+    assert!(fetched["kdf_salt"].is_null());
 }
 
 #[tokio::test]
@@ -112,4 +113,57 @@ async fn test_fetch_missing_share_returns_404() {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+async fn register_and_login(app: &axum::Router, user: &str) -> axum::http::HeaderValue {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username={user}&password=secret")))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username={user}&password=secret")))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    res.headers().get("set-cookie").unwrap().clone()
+}
+
+#[tokio::test]
+async fn test_password_protected_share_roundtrips_salt() {
+    let db = init_db_memory().await;
+    let app = build_app(db);
+    let cookie = register_and_login(&app, "carol").await;
+
+    let payload = r#"{"encrypted_payload":"cipher","kdf_salt":"c2FsdHNhbHQ="}"#;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(payload))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    let slug = serde_json::from_str::<serde_json::Value>(&body).unwrap()["slug"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["encrypted_payload"].as_str(), Some("cipher"));
+    assert_eq!(v["kdf_salt"].as_str(), Some("c2FsdHNhbHQ="));
 }

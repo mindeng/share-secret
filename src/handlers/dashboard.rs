@@ -25,7 +25,7 @@ pub async fn dashboard(
     CurrentUser(user): CurrentUser,
 ) -> Result<Html<String>, AppError> {
     let shares: Vec<Share> = sqlx::query_as(
-        "SELECT id, user_id, slug, encrypted_payload, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC",
+        "SELECT id, user_id, slug, encrypted_payload, kdf_salt, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC",
     )
     .bind(user.id)
     .fetch_all(&state.db)

@@ -18,11 +18,14 @@ pub struct ViewShareTemplate;
 #[derive(Serialize)]
 pub struct SharePayloadResponse {
     pub encrypted_payload: String,
+    pub kdf_salt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateShareRequest {
     pub encrypted_payload: String,
+    #[serde(default)]
+    pub kdf_salt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,10 +64,11 @@ pub async fn create_share(
         slug = generate_slug();
     }
 
-    sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt) VALUES (?, ?, ?, ?)")
         .bind(user.id)
         .bind(&slug)
         .bind(&req.encrypted_payload)
+        .bind(&req.kdf_salt)
         .execute(&state.db)
         .await?;
 
@@ -97,13 +101,13 @@ pub async fn get_share_payload(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
 ) -> Result<Json<SharePayloadResponse>, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT encrypted_payload FROM shares WHERE slug = ?")
+    let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT encrypted_payload, kdf_salt FROM shares WHERE slug = ?")
         .bind(&slug)
         .fetch_optional(&state.db)
         .await?;
 
     match row {
-        Some((encrypted_payload,)) => Ok(Json(SharePayloadResponse { encrypted_payload })),
+        Some((encrypted_payload, kdf_salt)) => Ok(Json(SharePayloadResponse { encrypted_payload, kdf_salt })),
         None => Err(AppError::NotFound),
     }
 }
