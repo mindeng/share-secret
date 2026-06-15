@@ -1,7 +1,14 @@
+use rand::Rng;
+
 pub const SLUG_LEN: usize = 12;
 
-pub fn is_valid_slug(slug: &str) -> bool {
-    slug.len() == SLUG_LEN && slug.chars().all(|c| c.is_ascii_alphanumeric())
+const SLUG_CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+pub fn generate_slug() -> String {
+    let mut rng = rand::thread_rng();
+    (0..SLUG_LEN)
+        .map(|_| SLUG_CHARSET[rng.gen_range(0..SLUG_CHARSET.len())] as char)
+        .collect()
 }
 
 #[cfg(test)]
@@ -9,22 +16,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid_slug_passes() {
-        assert!(is_valid_slug("abc123DEF456"));
-    }
-
-    #[test]
-    fn short_slug_fails() {
-        assert!(!is_valid_slug("abc123"));
-    }
-
-    #[test]
-    fn invalid_char_slug_fails() {
-        assert!(!is_valid_slug("abc123DEF45-"));
-    }
-
-    #[test]
-    fn empty_slug_fails() {
-        assert!(!is_valid_slug(""));
+    fn generated_slug_has_correct_length_and_charset() {
+        let slug = generate_slug();
+        assert_eq!(slug.len(), SLUG_LEN);
+        assert!(slug.chars().all(|c| c.is_ascii_alphanumeric()));
     }
 }

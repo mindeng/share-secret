@@ -1,14 +1,10 @@
 use crate::auth::CurrentUser;
-use crate::crypto::{is_valid_slug, SLUG_LEN};
+use crate::crypto::generate_slug;
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
-use axum::{
-    extract::State,
-    response::Html,
-    Json,
-};
-use serde::Deserialize;
+use axum::{extract::State, response::Html, Json};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Template)]
@@ -17,8 +13,12 @@ pub struct NewShareTemplate;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateShareRequest {
-    pub slug: String,
     pub encrypted_payload: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateShareResponse {
+    pub slug: String,
 }
 
 pub async fn new_share_page(
@@ -31,22 +31,32 @@ pub async fn create_share(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,
     Json(req): Json<CreateShareRequest>,
-) -> Result<(), AppError> {
-    if req.slug.len() != SLUG_LEN || !is_valid_slug(&req.slug) {
-        return Err(AppError::BadRequest("slug 无效"));
-    }
+) -> Result<Json<CreateShareResponse>, AppError> {
     if req.encrypted_payload.is_empty() {
         return Err(AppError::BadRequest("加密内容不能为空"));
     }
 
+    let mut slug = generate_slug();
+    for _ in 0..10 {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM shares WHERE slug = ?")
+            .bind(&slug)
+            .fetch_optional(&state.db)
+            .await?
+            .is_some();
+        if !exists {
+            break;
+        }
+        slug = generate_slug();
+    }
+
     sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload) VALUES (?, ?, ?)")
         .bind(user.id)
-        .bind(&req.slug)
+        .bind(&slug)
         .bind(&req.encrypted_payload)
         .execute(&state.db)
         .await?;
 
-    Ok(())
+    Ok(Json(CreateShareResponse { slug }))
 }
 
 pub async fn delete_share() -> Html<&'static str> {
