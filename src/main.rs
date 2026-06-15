@@ -10,6 +10,7 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
+use tower_http::services::ServeDir;
 use tower_sessions::{MemoryStore, SessionManagerLayer};
 
 #[derive(Clone)]
@@ -26,6 +27,7 @@ async fn main() {
     let session_layer = SessionManagerLayer::new(session_store);
 
     let app = Router::new()
+        .nest_service("/static", ServeDir::new("static"))
         .route("/", get(handlers::dashboard::index))
         .route("/register", get(handlers::auth::register_page).post(handlers::auth::register))
         .route("/login", get(handlers::auth::login_page).post(handlers::auth::login))

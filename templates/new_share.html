@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}创建分享 - Share Secret{% endblock %}
+
+{% block content %}
+<h1>创建分享</h1>
+<form id="share-form">
+    <label>标题 <input type="text" id="title" required></label>
+
+    <div id="fields">
+        <div class="field">
+            <label>字段名 <input type="text" class="label" required></label>
+            <label>值 <input type="text" class="value" required></label>
+        </div>
+    </div>
+    <button type="button" id="add-field" style="margin-bottom: 1rem;">添加字段</button>
+
+    <button type="submit">创建分享</button>
+</form>
+
+<div id="result" style="display:none; margin-top: 1rem; background: white; padding: 1rem; border-radius: 8px;">
+    <p>分享链接：</p>
+    <input type="text" id="share-link" readonly>
+    <button id="copy-link">复制链接</button>
+</div>
+
+<script src="/static/crypto.js"></script>
+<script>
+    document.getElementById('add-field').addEventListener('click', () => {
+        const div = document.createElement('div');
+        div.className = 'field';
+        div.innerHTML = `
+            <label>字段名 <input type="text" class="label" required></label>
+            <label>值 <input type="text" class="value" required></label>
+        `;
+        document.getElementById('fields').appendChild(div);
+    });
+
+    document.getElementById('share-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('title').value;
+        const fields = [];
+        document.querySelectorAll('.field').forEach(el => {
+            const label = el.querySelector('.label').value;
+            const value = el.querySelector('.value').value;
+            fields.push({ label, value });
+        });
+
+        const payload = { title, fields };
+        const { slug, key, encryptedPayload } = await createShare(payload);
+
+        const fullUrl = `${window.location.origin}/s/${slug}#key=${key}`;
+        document.getElementById('share-link').value = fullUrl;
+        document.getElementById('result').style.display = 'block';
+    });
+
+    document.getElementById('copy-link').addEventListener('click', () => {
+        const input = document.getElementById('share-link');
+        input.select();
+        navigator.clipboard.writeText(input.value).then(() => {
+            const btn = document.getElementById('copy-link');
+            btn.textContent = '已复制';
+            setTimeout(() => btn.textContent = '复制链接', 1500);
+        });
+    });
+</script>
+{% endblock %}
