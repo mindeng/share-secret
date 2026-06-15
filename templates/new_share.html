@@ -55,14 +55,18 @@
         });
 
         const payload = { title, fields };
-        const { slug, key, passwordProtected } = await createShare(payload, password);
+        try {
+            const { slug, key, passwordProtected } = await createShare(payload, password);
 
-        const fullUrl = passwordProtected
-            ? `${window.location.origin}/s/${slug}`
-            : `${window.location.origin}/s/${slug}#key=${key}`;
-        document.getElementById('share-link').value = fullUrl;
-        document.getElementById('password-hint').style.display = passwordProtected ? 'block' : 'none';
-        document.getElementById('result').style.display = 'block';
+            const fullUrl = passwordProtected
+                ? `${window.location.origin}/s/${slug}`
+                : `${window.location.origin}/s/${slug}#key=${key}`;
+            document.getElementById('share-link').value = fullUrl;
+            document.getElementById('password-hint').style.display = passwordProtected ? 'block' : 'none';
+            document.getElementById('result').style.display = 'block';
+        } catch (err) {
+            alert('创建失败：' + err.message);
+        }
     });
 
     document.getElementById('copy-link').addEventListener('click', () => {
