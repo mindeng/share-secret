@@ -37,7 +37,7 @@ pub async fn create_share(
     }
 
     let mut slug = generate_slug();
-    for _ in 0..10 {
+    for attempt in 0..10 {
         let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM shares WHERE slug = ?")
             .bind(&slug)
             .fetch_optional(&state.db)
@@ -45,6 +45,9 @@ pub async fn create_share(
             .is_some();
         if !exists {
             break;
+        }
+        if attempt == 9 {
+            return Err(AppError::BadRequest("无法生成唯一链接，请重试"));
         }
         slug = generate_slug();
     }
