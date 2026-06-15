@@ -47,7 +47,7 @@
         });
 
         const payload = { title, fields };
-        const { slug, key, encryptedPayload } = await createShare(payload);
+        const { slug, key } = await createShare(payload);
 
         const fullUrl = `${window.location.origin}/s/${slug}#key=${key}`;
         document.getElementById('share-link').value = fullUrl;

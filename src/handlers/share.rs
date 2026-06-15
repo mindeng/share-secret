@@ -1,4 +1,5 @@
 use crate::auth::CurrentUser;
+use crate::crypto::{is_valid_slug, SLUG_LEN};
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
@@ -14,19 +15,15 @@ use std::sync::Arc;
 #[template(path = "new_share.html")]
 pub struct NewShareTemplate;
 
-#[derive(Template)]
-#[template(path = "share_created.html")]
-pub struct ShareCreatedTemplate {
-    pub slug: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CreateShareRequest {
     pub slug: String,
     pub encrypted_payload: String,
 }
 
-pub async fn new_share_page() -> Result<Html<String>, AppError> {
+pub async fn new_share_page(
+    CurrentUser(_user): CurrentUser,
+) -> Result<Html<String>, AppError> {
     Ok(Html(NewShareTemplate.render()?))
 }
 
@@ -34,7 +31,14 @@ pub async fn create_share(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,
     Json(req): Json<CreateShareRequest>,
-) -> Result<Html<String>, AppError> {
+) -> Result<(), AppError> {
+    if req.slug.len() != SLUG_LEN || !is_valid_slug(&req.slug) {
+        return Err(AppError::BadRequest("slug 无效"));
+    }
+    if req.encrypted_payload.is_empty() {
+        return Err(AppError::BadRequest("加密内容不能为空"));
+    }
+
     sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload) VALUES (?, ?, ?)")
         .bind(user.id)
         .bind(&req.slug)
@@ -42,8 +46,7 @@ pub async fn create_share(
         .execute(&state.db)
         .await?;
 
-    let template = ShareCreatedTemplate { slug: req.slug };
-    Ok(Html(template.render()?))
+    Ok(())
 }
 
 pub async fn delete_share() -> Html<&'static str> {
