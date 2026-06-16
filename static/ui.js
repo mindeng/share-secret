@@ -13,7 +13,8 @@ function _svgIcon(markup) {
 }
 
 function attachPasswordToggle(input) {
-    if (!input) return;
+    if (!input || input.dataset.toggleAttached) return;
+    input.dataset.toggleAttached = 'true';
 
     // 用 flex 容器包裹 input，让输入框与按钮并排
     const wrap = document.createElement('div');
