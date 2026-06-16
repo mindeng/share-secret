@@ -1,12 +1,14 @@
 use crate::auth::{hash_password, login_user, logout_user, verify_password};
-use crate::models::{LoginForm, RegisterForm};
+use crate::models::{CodeForm, LoginForm, RegisterForm};
+use crate::security::CodeError;
 use crate::AppState;
 use askama::Template;
 use axum::{
     extract::State,
     response::{Html, IntoResponse, Redirect},
-    Form,
+    Form, Json,
 };
+use serde::Serialize;
 use std::sync::Arc;
 use tower_sessions::Session;
 
@@ -38,6 +40,47 @@ pub async fn register_page() -> RegisterTemplate {
     RegisterTemplate { error: None }
 }
 
+#[derive(Serialize)]
+pub struct CodeResponse {
+    pub ok: bool,
+    pub message: String,
+}
+
+pub async fn register_code(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<CodeForm>,
+) -> Json<CodeResponse> {
+    if form.username.trim().is_empty() {
+        return Json(CodeResponse {
+            ok: false,
+            message: "请先填写用户名".to_string(),
+        });
+    }
+    match state.codes.issue(&form.username) {
+        Ok(code) => {
+            println!("[验证码] 用户 {} 的注册验证码: {}", form.username, code);
+            Json(CodeResponse {
+                ok: true,
+                message: "验证码已打印到服务器控制台".to_string(),
+            })
+        }
+        Err(remaining) => Json(CodeResponse {
+            ok: false,
+            message: format!("请 {} 秒后再获取验证码", remaining.as_secs() + 1),
+        }),
+    }
+}
+
+fn code_error_message(e: CodeError) -> String {
+    match e {
+        CodeError::NoCode => "请先获取验证码",
+        CodeError::Expired => "验证码已过期，请重新获取",
+        CodeError::Wrong => "验证码错误",
+        CodeError::TooManyAttempts => "验证码错误次数过多，请重新获取",
+    }
+    .to_string()
+}
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Form(form): Form<RegisterForm>,
@@ -45,6 +88,12 @@ pub async fn register(
     if form.username.is_empty() || form.password.is_empty() {
         return Err(RegisterTemplate {
             error: Some("用户名和密码不能为空".to_string()),
+        });
+    }
+
+    if let Err(e) = state.codes.verify(&form.username, &form.code) {
+        return Err(RegisterTemplate {
+            error: Some(code_error_message(e)),
         });
     }
 
