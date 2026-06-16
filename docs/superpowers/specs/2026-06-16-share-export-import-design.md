@@ -37,7 +37,6 @@ Versioned JSON envelope:
 ```json
 {
   "version": 1,
-  "exported_at": "2026-06-16 12:00:00",
   "shares": [
     {
       "slug": "Ab3xY7zQ9pLm",
@@ -52,6 +51,9 @@ Versioned JSON envelope:
 - Exactly the four stored columns per share. No `id`, no `user_id` — those are
   instance/account-local.
 - `version` lets the format evolve; import rejects any version other than `1`.
+  It is the only envelope-level metadata: an `exported_at` timestamp was
+  considered but dropped (would force a new date dependency or backend-specific
+  SQL, and import never reads it).
 - `created_at` uses the same text form the app already stores
   (`YYYY-MM-DD HH:MM:SS`).
 
