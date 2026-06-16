@@ -22,7 +22,7 @@ spec:
     # - name: https
     #   protocol: HTTPS
     #   port: 443
-    #   hostname: share-secret.example.com
+    #   hostname: ${APP_DOMAIN}
     #   tls:
     #     mode: Terminate
     #     certificateRefs:

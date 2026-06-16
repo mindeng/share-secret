@@ -7,9 +7,10 @@ metadata:
 spec:
   parentRefs:
     - name: share-secret
-  # Set your real hostname, or remove hostnames to match any host.
+  # Injected at apply time via envsubst from the APP_DOMAIN env var.
+  # See k8s/README.md → Deploy.
   hostnames:
-    - share-secret.example.com
+    - ${APP_DOMAIN}
   rules:
     - matches:
         - path:

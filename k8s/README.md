@@ -40,21 +40,31 @@ kubectl create secret docker-registry ghcr-pull \
 ### 3. Gateway
 
 Set `gatewayClassName` in `base/gateway.yaml` to a class that exists in your
-cluster (`kubectl get gatewayclass`) and set the real hostname in both
-`base/gateway.yaml` and `base/httproute.yaml`.
+cluster (`kubectl get gatewayclass`). The hostname is **not** hard-coded — the
+HTTPRoute uses a `${APP_DOMAIN}` placeholder filled in at apply time (below).
 
 ## Deploy
 
+The HTTPRoute hostname comes from the `APP_DOMAIN` env var via `envsubst`, so the
+domain lives in your environment / CI, not in git:
+
 ```bash
-# Preview the rendered manifests
-kubectl kustomize k8s/overlays/production
+export APP_DOMAIN=secret.yourdomain.com
+
+# Preview
+kubectl kustomize k8s/overlays/production | envsubst
 
 # Apply
-kubectl apply -k k8s/overlays/production
+kubectl kustomize k8s/overlays/production | envsubst | kubectl apply -f -
 ```
 
-Argo CD / Flux users: point the application at `k8s/overlays/production` and it
-syncs automatically whenever CI bumps the tag.
+> `envsubst` ships with GNU gettext (`apt install gettext-base` if missing).
+> Only `${APP_DOMAIN}` is substituted — nothing else in the manifests uses `$`.
+
+Argo CD / Flux users: point the application at `k8s/overlays/production`. Argo
+CD needs the **envsubst / Kustomize plugin** (or a `replacement`) to fill
+`${APP_DOMAIN}`; set `APP_DOMAIN` as a build environment variable on the app.
+The image tag still syncs automatically whenever CI bumps it.
 
 ## Notes
 
