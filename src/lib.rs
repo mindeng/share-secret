@@ -61,6 +61,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/shares/:id/delete", post(handlers::share::delete_share))
         .route("/s/:slug", get(handlers::share::view_share))
         .route("/api/shares/:slug", get(handlers::share::get_share_payload))
+        .route("/api/shares/:slug/update", post(handlers::share::update_share))
         .layer(session_layer)
         .with_state(state)
 }

@@ -3,7 +3,7 @@ use crate::crypto::generate_slug;
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
-use axum::{extract::{Path, State}, response::{Html, Redirect}, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::{Html, Redirect}, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_sessions::Session;
@@ -24,7 +24,7 @@ pub struct SharePayloadResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateShareRequest {
+pub struct SharePayload {
     pub encrypted_payload: String,
     #[serde(default)]
     pub kdf_salt: Option<String>,
@@ -44,7 +44,7 @@ pub async fn new_share_page(
 pub async fn create_share(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,
-    Json(req): Json<CreateShareRequest>,
+    Json(req): Json<SharePayload>,
 ) -> Result<Json<CreateShareResponse>, AppError> {
     if req.encrypted_payload.is_empty() {
         return Err(AppError::BadRequest("加密内容不能为空"));
@@ -75,6 +75,33 @@ pub async fn create_share(
         .await?;
 
     Ok(Json(CreateShareResponse { slug }))
+}
+
+pub async fn update_share(
+    State(state): State<Arc<AppState>>,
+    CurrentUser(user): CurrentUser,
+    Path(slug): Path<String>,
+    Json(req): Json<SharePayload>,
+) -> Result<StatusCode, AppError> {
+    if req.encrypted_payload.is_empty() {
+        return Err(AppError::BadRequest("加密内容不能为空"));
+    }
+
+    let result = sqlx::query(
+        "UPDATE shares SET encrypted_payload = ?, kdf_salt = ? WHERE slug = ? AND user_id = ?",
+    )
+    .bind(&req.encrypted_payload)
+    .bind(&req.kdf_salt)
+    .bind(&slug)
+    .bind(user.id)
+    .execute(&state.db)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Forbidden);
+    }
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn delete_share(
