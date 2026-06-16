@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: share-secret
+  labels:
+    app: share-secret
+spec:
+  replicas: 1
+  # SQLite is a single-writer file on a ReadWriteOnce PVC. Recreate avoids two
+  # pods holding the same volume during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: share-secret
+  template:
+    metadata:
+      labels:
+        app: share-secret
+    spec:
+      # ghcr packages are private by default. Either make the package public, or
+      # create this pull secret (see k8s/README.md) and keep this line.
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: share-secret
+          # Overridden by kustomize `images:` in each overlay. Do not pin here.
+          image: share-secret
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:3000"
+            - name: DATABASE_URL
+              value: "sqlite:/data/share_secret.db"
+            # Served behind an HTTPS gateway, so keep Secure cookies on.
+            - name: SECURE_COOKIES
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: share-secret-data

@@ -1,0 +1,10 @@
+target
+.git
+.github
+k8s
+docs
+tests
+*.db
+*.db-shm
+*.db-wal
+*.md

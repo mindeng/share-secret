@@ -1,0 +1,32 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: share-secret
+  labels:
+    app: share-secret
+spec:
+  # The GatewayClass installed in your cluster. Examples:
+  #   - ACK Gateway with Inference / ALB:  alibabacloudloadbalancer
+  #   - Istio:                             istio
+  #   - Envoy Gateway:                     eg
+  # Run `kubectl get gatewayclass` and set the matching name here.
+  gatewayClassName: REPLACE_WITH_YOUR_GATEWAYCLASS
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    # Terminate TLS here once you have a cert Secret. Then add an HTTPS listener:
+    # - name: https
+    #   protocol: HTTPS
+    #   port: 443
+    #   hostname: share-secret.example.com
+    #   tls:
+    #     mode: Terminate
+    #     certificateRefs:
+    #       - name: share-secret-tls
+    #     allowedRoutes:
+    #       namespaces:
+    #         from: Same

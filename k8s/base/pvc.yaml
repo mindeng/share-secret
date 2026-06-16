@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: share-secret-data
+  labels:
+    app: share-secret
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uses the cluster's default StorageClass. Uncomment to pin one, e.g. on ACK:
+  # storageClassName: alicloud-disk-essd

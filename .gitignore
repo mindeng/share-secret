@@ -2,3 +2,7 @@ target
 *.db
 *.db-shm
 *.db-wal
+
+# editor swap files
+*.swp
+*.swo
