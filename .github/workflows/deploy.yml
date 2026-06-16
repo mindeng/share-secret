@@ -63,8 +63,12 @@ jobs:
       - name: Bump image tag in kustomize overlay
         env:
           IMAGE: ${{ steps.img.outputs.name }}
+          # Pin kustomize instead of piping the upstream install_kustomize.sh,
+          # which queries the GitHub API for the latest release and fails
+          # intermittently (rate limits / missing tarball -> tar error).
+          KUSTOMIZE_VERSION: "5.8.1"
         run: |
-          curl -sSfL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          curl -sSfL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xz
           SHA_TAG="sha-$(git rev-parse --short HEAD)"
           cd k8s/overlays/production
           ../../../kustomize edit set image "share-secret=${IMAGE}:${SHA_TAG}"
