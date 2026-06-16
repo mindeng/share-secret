@@ -7,7 +7,8 @@ fn pg_url() -> Option<String> {
         .filter(|u| u.starts_with("postgres"))
 }
 
-/// 证明 Any 驱动会把 `?` 占位符改写为 `$1`，并能正确解码 i64 / String / Option<String>。
+/// 证明 `$1` 占位符在 Postgres 上经 Any 可用（Any 不会改写 `?`，故统一用 `$1`），
+/// 并能正确解码 i64 / String / Option<String>。
 #[tokio::test]
 async fn spike_any_postgres_placeholders_and_types() {
     let Some(url) = pg_url() else {
@@ -32,15 +33,15 @@ async fn spike_any_postgres_placeholders_and_types() {
     .await
     .unwrap();
 
-    // INSERT with `?` placeholders — Any must rewrite to $1, $2 for Postgres.
+    // INSERT with $1/$2 placeholders — the form that works on both backends via Any.
     sqlx::query("INSERT INTO spike_t (name, note) VALUES ($1, $2)")
         .bind("alice")
         .bind(Option::<String>::None)
         .execute(&pool)
         .await
-        .expect("insert with ? placeholders");
+        .expect("insert with $1/$2 placeholders");
 
-    // SELECT back with a `?` placeholder and decode i64 + String + Option<String>.
+    // SELECT back with a $1 placeholder and decode i64 + String + Option<String>.
     let row: (i64, String, Option<String>) =
         sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = $1")
             .bind("alice")
