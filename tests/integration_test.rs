@@ -1,6 +1,8 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use share_secret::{build_app, db::init_db_memory};
+use share_secret::security::{CodeStore, LoginGuard};
+use share_secret::{build_router, db::init_db_memory, AppState};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 async fn body_string(body: Body) -> String {
@@ -8,13 +10,58 @@ async fn body_string(body: Body) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+async fn make_app() -> (axum::Router, Arc<AppState>) {
+    let db = init_db_memory().await;
+    let state = Arc::new(AppState {
+        db,
+        codes: CodeStore::new(),
+        login_guard: LoginGuard::new(),
+    });
+    (build_router(state.clone()), state)
+}
+
+/// 走验证码流程注册一个用户，断言成功跳转。
+async fn register_user(app: &axum::Router, state: &Arc<AppState>, user: &str, pass: &str) {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register/code")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username={user}")))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    let code = state.codes.peek(user).expect("code issued");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username={user}&password={pass}&code={code}")))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+/// 注册并登录，返回会话 cookie。
+async fn register_and_login(
+    app: &axum::Router,
+    state: &Arc<AppState>,
+    user: &str,
+) -> axum::http::HeaderValue {
+    register_user(app, state, user, "secret").await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username={user}&password=secret")))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    res.headers().get("set-cookie").unwrap().clone()
+}
+
 #[tokio::test]
 async fn test_login_cookie_secure_by_default() {
-    // Session cookies are marked `Secure` by default (safe for HTTPS deployments).
-    // For plain-HTTP local dev, SECURE_COOKIES=false disables it; see build_app.
-    let db = init_db_memory().await;
-    let app = build_app(db);
-    let cookie = register_and_login(&app, "secitest").await;
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "secitest").await;
     let s = cookie.to_str().unwrap().to_lowercase();
     assert!(
         s.contains("secure"),
@@ -24,17 +71,8 @@ async fn test_login_cookie_secure_by_default() {
 
 #[tokio::test]
 async fn test_register_and_login() {
-    let db = init_db_memory().await;
-    let app = build_app(db);
-
-    let register_req = Request::builder()
-        .method("POST")
-        .uri("/register")
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(Body::from("username=alice&password=secret"))
-        .unwrap();
-    let res = app.clone().oneshot(register_req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let (app, state) = make_app().await;
+    register_user(&app, &state, "alice", "secret").await;
 
     let login_req = Request::builder()
         .method("POST")
@@ -48,17 +86,9 @@ async fn test_register_and_login() {
 
 #[tokio::test]
 async fn test_create_and_fetch_share() {
-    let db = init_db_memory().await;
-    let app = build_app(db);
+    let (app, state) = make_app().await;
 
-    // register
-    let req = Request::builder()
-        .method("POST")
-        .uri("/register")
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(Body::from("username=bob&password=secret"))
-        .unwrap();
-    app.clone().oneshot(req).await.unwrap();
+    register_user(&app, &state, "bob", "secret").await;
 
     // login
     let req = Request::builder()
@@ -102,8 +132,7 @@ async fn test_create_and_fetch_share() {
 
 #[tokio::test]
 async fn test_create_share_requires_auth() {
-    let db = init_db_memory().await;
-    let app = build_app(db);
+    let (app, _state) = make_app().await;
 
     let payload = r#"{"encrypted_payload":"testpayload"}"#;
     let req = Request::builder()
@@ -118,8 +147,7 @@ async fn test_create_share_requires_auth() {
 
 #[tokio::test]
 async fn test_fetch_missing_share_returns_404() {
-    let db = init_db_memory().await;
-    let app = build_app(db);
+    let (app, _state) = make_app().await;
 
     let req = Request::builder()
         .uri("/api/shares/doesnotexist")
@@ -129,30 +157,10 @@ async fn test_fetch_missing_share_returns_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-async fn register_and_login(app: &axum::Router, user: &str) -> axum::http::HeaderValue {
-    let req = Request::builder()
-        .method("POST")
-        .uri("/register")
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(Body::from(format!("username={user}&password=secret")))
-        .unwrap();
-    app.clone().oneshot(req).await.unwrap();
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/login")
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(Body::from(format!("username={user}&password=secret")))
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    res.headers().get("set-cookie").unwrap().clone()
-}
-
 #[tokio::test]
 async fn test_password_protected_share_roundtrips_salt() {
-    let db = init_db_memory().await;
-    let app = build_app(db);
-    let cookie = register_and_login(&app, "carol").await;
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "carol").await;
 
     let payload = r#"{"encrypted_payload":"cipher","kdf_salt":"c2FsdHNhbHQ="}"#;
     let req = Request::builder()
@@ -180,4 +188,78 @@ async fn test_password_protected_share_roundtrips_salt() {
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["encrypted_payload"].as_str(), Some("cipher"));
     assert_eq!(v["kdf_salt"].as_str(), Some("c2FsdHNhbHQ="));
+}
+
+#[tokio::test]
+async fn test_register_requires_valid_code() {
+    let (app, _state) = make_app().await;
+
+    // 未获取验证码直接注册 -> 重渲染注册页并提示
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("username=eve&password=secret&code=123456"))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK); // 非 303 跳转
+    let body = body_string(res.into_body()).await;
+    assert!(body.contains("请先获取验证码"), "body: {body}");
+}
+
+#[tokio::test]
+async fn test_register_rejects_wrong_code() {
+    let (app, state) = make_app().await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register/code")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("username=frank"))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+    let real = state.codes.peek("frank").expect("code issued");
+    // 构造一个保证不同的错误码
+    let wrong = if real == "000000" { "111111" } else { "000000" };
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/register")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("username=frank&password=secret&code={wrong}")))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    assert!(body.contains("验证码错误"), "body: {body}");
+}
+
+#[tokio::test]
+async fn test_login_locks_after_failures() {
+    let (app, state) = make_app().await;
+    register_user(&app, &state, "grace", "secret").await;
+
+    // 连续 5 次错误密码
+    for _ in 0..5 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/login")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from("username=grace&password=wrong"))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK); // 失败重渲染登录页
+    }
+
+    // 第 6 次即使密码正确也被锁定
+    let req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("username=grace&password=secret"))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK); // 未跳转 = 被拦
+    let body = body_string(res.into_body()).await;
+    assert!(body.contains("尝试过于频繁"), "body: {body}");
 }
