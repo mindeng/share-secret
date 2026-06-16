@@ -68,7 +68,7 @@ by the URL scheme — the only place that branches:
       id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (now())::text
+      created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
   );
   CREATE TABLE IF NOT EXISTS shares (
       id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -76,7 +76,7 @@ by the URL scheme — the only place that branches:
       slug TEXT UNIQUE NOT NULL,
       encrypted_payload TEXT NOT NULL,
       kdf_salt TEXT,
-      created_at TEXT NOT NULL DEFAULT (now())::text
+      created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
   );
   ```
 

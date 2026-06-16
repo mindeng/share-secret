@@ -36,7 +36,7 @@ Key facts you must respect:
 
 ## Task 1: Add sqlx features + driver helper + Postgres spike (gated)
 
-Proves the Any driver rewrites `?`→`$1` and decodes `i64`/`String`/`Option<String>` against a real Postgres, **before** any app code is migrated. Without `TEST_DATABASE_URL` the spike skips, so the default suite is unaffected.
+Proves that `$1`-style placeholders work on Postgres via Any (Any does NOT rewrite `?`, so we standardize on `$1`) and that Any decodes `i64`/`String`/`Option<String>` against a real Postgres, **before** any app code is migrated. Without `TEST_DATABASE_URL` the spike skips, so the default suite is unaffected.
 
 **Files:**
 - Modify: `Cargo.toml:10`
@@ -118,17 +118,17 @@ async fn spike_any_postgres_placeholders_and_types() {
     .await
     .unwrap();
 
-    // INSERT with `?` placeholders — Any must rewrite to $1, $2 for Postgres.
-    sqlx::query("INSERT INTO spike_t (name, note) VALUES (?, ?)")
+    // INSERT with $1/$2 placeholders — the form that works on both backends via Any.
+    sqlx::query("INSERT INTO spike_t (name, note) VALUES ($1, $2)")
         .bind("alice")
         .bind(Option::<String>::None)
         .execute(&pool)
         .await
-        .expect("insert with ? placeholders");
+        .expect("insert with $1/$2 placeholders");
 
-    // SELECT back with a `?` placeholder and decode i64 + String + Option<String>.
+    // SELECT back with a $1 placeholder and decode i64 + String + Option<String>.
     let row: (i64, String, Option<String>) =
-        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = ?")
+        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = $1")
             .bind("alice")
             .fetch_one(&pool)
             .await
