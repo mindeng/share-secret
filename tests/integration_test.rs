@@ -265,6 +265,134 @@ async fn test_login_locks_after_failures() {
 }
 
 #[tokio::test]
+async fn test_is_owner_flag() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "owner1").await;
+
+    // owner creates a share
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"orig"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let body = body_string(res.into_body()).await;
+    let slug = serde_json::from_str::<serde_json::Value>(&body).unwrap()["slug"]
+        .as_str().unwrap().to_string();
+
+    // owner fetch -> is_owner true
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["is_owner"].as_bool(), Some(true));
+
+    // anonymous fetch -> is_owner false
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["is_owner"].as_bool(), Some(false));
+}
+
+async fn create_share_with(app: &axum::Router, cookie: &axum::http::HeaderValue, body: &str) -> String {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    serde_json::from_str::<serde_json::Value>(&body).unwrap()["slug"]
+        .as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn test_owner_can_update_share() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "upowner").await;
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"orig"}"#).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"updated"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["encrypted_payload"].as_str(), Some("updated"));
+}
+
+#[tokio::test]
+async fn test_non_owner_cannot_update_share() {
+    let (app, state) = make_app().await;
+    let owner = register_and_login(&app, &state, "realowner").await;
+    let slug = create_share_with(&app, &owner, r#"{"encrypted_payload":"orig"}"#).await;
+    let attacker = register_and_login(&app, &state, "attacker").await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", attacker.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"hacked"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_update_requires_auth() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "needauth").await;
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"orig"}"#).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"encrypted_payload":"x"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_update_missing_slug_forbidden() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "ghostupd").await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares/nosuchslug/update")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"x"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn test_login_trims_username() {
     let (app, state) = make_app().await;
     register_user(&app, &state, "ivan", "secret").await;
@@ -278,4 +406,62 @@ async fn test_login_trims_username() {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}
+
+#[tokio::test]
+async fn test_update_rejects_empty_payload() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "emptyupd").await;
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"orig"}"#).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":""}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_update_sets_and_clears_kdf_salt() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "saltupd").await;
+    // start as a link-mode share (no salt)
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"orig"}"#).await;
+
+    // update -> password mode (sets a salt)
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"c1","kdf_salt":"c2FsdHk="}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder().uri(format!("/api/shares/{slug}")).body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["kdf_salt"].as_str(), Some("c2FsdHk="));
+
+    // update -> back to link mode (clears the salt)
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"c2"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder().uri(format!("/api/shares/{slug}")).body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert!(v["kdf_salt"].is_null());
+    assert_eq!(v["encrypted_payload"].as_str(), Some("c2"));
 }

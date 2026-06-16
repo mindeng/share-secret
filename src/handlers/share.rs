@@ -1,11 +1,12 @@
-use crate::auth::CurrentUser;
+use crate::auth::{current_user_id, CurrentUser};
 use crate::crypto::generate_slug;
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
-use axum::{extract::{Path, State}, response::{Html, Redirect}, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::{Html, Redirect}, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tower_sessions::Session;
 
 #[derive(Template)]
 #[template(path = "new_share.html")]
@@ -19,10 +20,11 @@ pub struct ViewShareTemplate;
 pub struct SharePayloadResponse {
     pub encrypted_payload: String,
     pub kdf_salt: Option<String>,
+    pub is_owner: bool,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateShareRequest {
+pub struct SharePayload {
     pub encrypted_payload: String,
     #[serde(default)]
     pub kdf_salt: Option<String>,
@@ -42,7 +44,7 @@ pub async fn new_share_page(
 pub async fn create_share(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,
-    Json(req): Json<CreateShareRequest>,
+    Json(req): Json<SharePayload>,
 ) -> Result<Json<CreateShareResponse>, AppError> {
     if req.encrypted_payload.is_empty() {
         return Err(AppError::BadRequest("加密内容不能为空"));
@@ -75,6 +77,33 @@ pub async fn create_share(
     Ok(Json(CreateShareResponse { slug }))
 }
 
+pub async fn update_share(
+    State(state): State<Arc<AppState>>,
+    CurrentUser(user): CurrentUser,
+    Path(slug): Path<String>,
+    Json(req): Json<SharePayload>,
+) -> Result<StatusCode, AppError> {
+    if req.encrypted_payload.is_empty() {
+        return Err(AppError::BadRequest("加密内容不能为空"));
+    }
+
+    let result = sqlx::query(
+        "UPDATE shares SET encrypted_payload = ?, kdf_salt = ? WHERE slug = ? AND user_id = ?",
+    )
+    .bind(&req.encrypted_payload)
+    .bind(&req.kdf_salt)
+    .bind(&slug)
+    .bind(user.id)
+    .execute(&state.db)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::Forbidden);
+    }
+
+    Ok(StatusCode::OK)
+}
+
 pub async fn delete_share(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,
@@ -99,15 +128,20 @@ pub async fn view_share(Path(_slug): Path<String>) -> Result<Html<String>, AppEr
 
 pub async fn get_share_payload(
     State(state): State<Arc<AppState>>,
+    session: Session,
     Path(slug): Path<String>,
 ) -> Result<Json<SharePayloadResponse>, AppError> {
-    let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT encrypted_payload, kdf_salt FROM shares WHERE slug = ?")
-        .bind(&slug)
-        .fetch_optional(&state.db)
-        .await?;
+    let row: Option<(i64, String, Option<String>)> =
+        sqlx::query_as("SELECT user_id, encrypted_payload, kdf_salt FROM shares WHERE slug = ?")
+            .bind(&slug)
+            .fetch_optional(&state.db)
+            .await?;
 
     match row {
-        Some((encrypted_payload, kdf_salt)) => Ok(Json(SharePayloadResponse { encrypted_payload, kdf_salt })),
+        Some((owner_id, encrypted_payload, kdf_salt)) => {
+            let is_owner = current_user_id(&session).await == Some(owner_id);
+            Ok(Json(SharePayloadResponse { encrypted_payload, kdf_salt, is_owner }))
+        }
         None => Err(AppError::NotFound),
     }
 }
