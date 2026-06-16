@@ -263,3 +263,19 @@ async fn test_login_locks_after_failures() {
     let body = body_string(res.into_body()).await;
     assert!(body.contains("尝试过于频繁"), "body: {body}");
 }
+
+#[tokio::test]
+async fn test_login_trims_username() {
+    let (app, state) = make_app().await;
+    register_user(&app, &state, "ivan", "secret").await;
+
+    // 登录时用户名带尾随空格（%20），应被 trim 后匹配成功
+    let req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("username=ivan%20&password=secret"))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+}

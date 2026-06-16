@@ -123,7 +123,9 @@ pub async fn login(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Result<Redirect, LoginTemplate> {
-    if let Err(remaining) = state.login_guard.check(&form.username) {
+    let username = form.username.trim();
+
+    if let Err(remaining) = state.login_guard.check(username) {
         let mins = remaining.as_secs() / 60 + 1;
         return Err(LoginTemplate {
             error: Some(format!("尝试过于频繁，请 {mins} 分钟后再试")),
@@ -132,7 +134,7 @@ pub async fn login(
 
     let row: Option<(i64, String)> =
         sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
-            .bind(&form.username)
+            .bind(username)
             .fetch_optional(&state.db)
             .await
             .map_err(|_| LoginTemplate {
@@ -141,12 +143,12 @@ pub async fn login(
 
     match row {
         Some((id, hash)) if verify_password(&form.password, &hash) => {
-            state.login_guard.record_success(&form.username);
+            state.login_guard.record_success(username);
             login_user(&session, id).await;
             Ok(Redirect::to("/dashboard"))
         }
         _ => {
-            state.login_guard.record_failure(&form.username);
+            state.login_guard.record_failure(username);
             Err(LoginTemplate {
                 error: Some("用户名或密码错误".to_string()),
             })
