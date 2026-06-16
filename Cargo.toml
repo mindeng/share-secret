@@ -7,7 +7,7 @@ edition = "2024"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 askama = "0.13"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres", "any", "migrate"] }
 argon2 = "0.5"
 tower-sessions = "0.13"
 tower-cookies = "0.10"

@@ -2,6 +2,16 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::env;
 use std::str::FromStr;
+use std::sync::Once;
+
+static DRIVERS: Once = Once::new();
+
+/// 进程内只安装一次 Any 驱动（重复安装会报错）。init_db/测试都通过它来安装。
+pub fn install_drivers_once() {
+    DRIVERS.call_once(|| {
+        sqlx::any::install_default_drivers();
+    });
+}
 
 pub async fn init_db() -> SqlitePool {
     let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:share_secret.db".to_string());
