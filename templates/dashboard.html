@@ -5,10 +5,10 @@
 {% block content %}
 <h1>我的分享</h1>
 <p style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
-    <a href="/shares/new">创建新分享</a>
     <a href="/api/shares/export" download="share-secret-export.json">导出全部</a>
     <button type="button" id="import-btn" style="width: auto;">导入</button>
     <input type="file" id="import-file" accept="application/json,.json" style="display: none;">
+    <a href="/shares/new" style="margin-left:auto; background:#2563eb; color:#fff; padding:0.5rem 1rem; border-radius:4px; text-decoration:none;">创建新分享</a>
 </p>
 <p id="import-result" style="color: #555; font-size: 0.875rem;"></p>
 

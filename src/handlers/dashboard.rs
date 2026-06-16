@@ -3,7 +3,10 @@ use crate::error::AppError;
 use crate::models::Share;
 use crate::AppState;
 use askama::Template;
-use axum::{extract::State, response::Html};
+use axum::{
+    extract::State,
+    response::{Html, IntoResponse, Redirect, Response},
+};
 use std::sync::Arc;
 
 #[derive(Template)]
@@ -16,8 +19,11 @@ pub struct DashboardTemplate {
     pub shares: Vec<Share>,
 }
 
-pub async fn index() -> Result<Html<String>, AppError> {
-    Ok(Html(IndexTemplate.render()?))
+pub async fn index(user: Option<CurrentUser>) -> Result<Response, AppError> {
+    if user.is_some() {
+        return Ok(Redirect::to("/dashboard").into_response());
+    }
+    Ok(Html(IndexTemplate.render()?).into_response())
 }
 
 pub async fn dashboard(

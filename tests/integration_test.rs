@@ -678,3 +678,32 @@ async fn test_dashboard_renders_with_a_share() {
     let body = body_string(res.into_body()).await;
     assert!(body.contains(&slug), "rendered dashboard should list the share slug: {body}");
 }
+
+#[tokio::test]
+async fn test_index_redirects_logged_in_to_dashboard() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "homeuser").await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers().get("location").unwrap(), "/dashboard");
+}
+
+#[tokio::test]
+async fn test_index_anonymous_shows_landing() {
+    let (app, _state) = make_app().await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body_string(res.into_body()).await;
+    assert!(html.contains("注册"), "匿名首页应包含注册链接");
+}
