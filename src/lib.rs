@@ -17,12 +17,12 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 use crate::security::{CodeStore, LoginGuard};
 
 pub struct AppState {
-    pub db: sqlx::SqlitePool,
+    pub db: sqlx::AnyPool,
     pub codes: CodeStore,
     pub login_guard: LoginGuard,
 }
 
-pub fn build_app(db: sqlx::SqlitePool) -> Router {
+pub fn build_app(db: sqlx::AnyPool) -> Router {
     let state = Arc::new(AppState {
         db,
         codes: CodeStore::new(),

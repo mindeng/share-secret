@@ -66,6 +66,14 @@ CD needs the **envsubst / Kustomize plugin** (or a `replacement`) to fill
 `${APP_DOMAIN}`; set `APP_DOMAIN` as a build environment variable on the app.
 The image tag still syncs automatically whenever CI bumps it.
 
+## Database backend
+
+The base manifests run on SQLite backed by the PersistentVolumeClaim mounted at
+`/data` (`DATABASE_URL=sqlite:/data/share_secret.db`). To use PostgreSQL instead,
+point `DATABASE_URL` in `k8s/base/deployment.yaml` at a `postgres://…` URL
+(inject the credentials from a Secret) and drop the `/data` volume + PVC. The
+application binary supports both backends with no rebuild.
+
 ## Notes
 
 - **Single replica + Recreate**: SQLite is a single-writer file on a
