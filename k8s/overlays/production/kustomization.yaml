@@ -4,13 +4,13 @@ kind: Kustomization
 namespace: share-secret
 
 resources:
-  - namespace.yaml
-  - ../../base
+- namespace.yaml
+- ../../base
 
 # CI updates `newTag` automatically via `kustomize edit set image` on every
 # push to main (see .github/workflows/deploy.yml). `newName` is rewritten to
 # ghcr.io/<owner>/share-secret on the first run.
 images:
-  - name: share-secret
-    newName: ghcr.io/OWNER/share-secret
-    newTag: latest
+- name: share-secret
+  newName: ghcr.io/mindeng/share-secret
+  newTag: sha-5c7414c
