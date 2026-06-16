@@ -124,8 +124,16 @@
         valueInput.value = value || '';
         valueWrap.appendChild(valueInput);
 
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'remove-field';
+        removeBtn.textContent = '删除';
+        removeBtn.style.width = 'auto';
+        removeBtn.addEventListener('click', () => div.remove());
+
         div.appendChild(labelWrap);
         div.appendChild(valueWrap);
+        div.appendChild(removeBtn);
         document.getElementById('edit-fields').appendChild(div);
     }
 
