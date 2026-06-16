@@ -159,4 +159,12 @@ mod code_tests {
         let s = store();
         assert_eq!(s.verify("dave", "123456"), Err(CodeError::NoCode));
     }
+
+    #[test]
+    fn expired_code_is_rejected() {
+        let s = store();
+        let code = s.issue("erin").unwrap();
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(s.verify("erin", &code), Err(CodeError::Expired));
+    }
 }
