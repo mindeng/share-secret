@@ -68,15 +68,32 @@ The image tag still syncs automatically whenever CI bumps it.
 
 ## Database backend
 
-The base manifests run on SQLite backed by the PersistentVolumeClaim mounted at
-`/data` (`DATABASE_URL=sqlite:/data/share_secret.db`). To use PostgreSQL instead,
-point `DATABASE_URL` in `k8s/base/deployment.yaml` at a `postgres://…` URL
-(inject the credentials from a Secret) and drop the `/data` volume + PVC. The
-application binary supports both backends with no rebuild.
+The **base** manifests run on SQLite backed by the PersistentVolumeClaim mounted
+at `/data` (`DATABASE_URL=sqlite:/data/share_secret.db`). This is suitable for
+local / single-node use.
+
+The **production overlay** (`overlays/production`) runs on an **external
+PostgreSQL** instead. It patches the base Deployment to read `DATABASE_URL` from
+a Secret, removes the `/data` volume + PVC, and switches the rollout strategy
+from `Recreate` to `RollingUpdate` (no PVC single-writer contention once the DB
+is networked). The application binary supports both backends with no rebuild.
+
+Create the Secret once, out of band (it is **not** committed to git, matching the
+`ghcr-pull` / `APP_DOMAIN` convention):
+
+```bash
+kubectl create secret generic share-secret-db \
+  --namespace share-secret \
+  --from-literal=DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/share_secret'
+```
+
+The schema is created automatically on first connect (see `src/db.rs`
+`init_postgres_schema`). `replicas` stays at 1; with a networked DB you may now
+scale it up safely.
 
 ## Notes
 
-- **Single replica + Recreate**: SQLite is a single-writer file on a
-  ReadWriteOnce PVC. Do not scale `replicas` above 1 without switching to a
-  networked database.
+- **Single replica**: the base (SQLite) uses `Recreate` because SQLite is a
+  single-writer file on a ReadWriteOnce PVC. The production overlay switches to
+  PostgreSQL + `RollingUpdate`; you may scale `replicas` above 1 there safely.
 - **Local image build**: `docker build -t share-secret .`
