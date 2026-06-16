@@ -26,13 +26,17 @@
     <p>分享链接：</p>
     <input type="text" id="share-link" readonly>
     <button id="copy-link">复制链接</button>
+    <button type="button" id="go-share" style="width:auto; margin-top:0.5rem;">查看 / 编辑此分享</button>
     <p id="password-hint" style="display:none; color:#b45309; margin-top:0.75rem;">
         ⚠ 此分享受密码保护。请通过其它安全渠道把查看密码告诉对方，链接本身不含密钥。
     </p>
 </div>
 
 <script src="/static/crypto.js"></script>
+<script src="/static/ui.js"></script>
 <script>
+    attachPasswordToggle(document.getElementById('view-password'));
+
     document.getElementById('add-field').addEventListener('click', () => {
         const div = document.createElement('div');
         div.className = 'field';
@@ -63,6 +67,7 @@
                 : `${window.location.origin}/s/${slug}#key=${key}`;
             document.getElementById('share-link').value = fullUrl;
             document.getElementById('password-hint').style.display = passwordProtected ? 'block' : 'none';
+            document.getElementById('go-share').onclick = () => { window.location.href = fullUrl; };
             document.getElementById('result').style.display = 'block';
         } catch (err) {
             alert('创建失败：' + err.message);
