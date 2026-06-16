@@ -223,8 +223,10 @@ pub async fn init_db() -> AnyPool {
 
 pub async fn init_db_memory() -> AnyPool {
     install_drivers_once();
+    // 必须用单连接：`sqlite::memory:` 每条连接都是独立的内存库，
+    // 多连接会导致建表的连接和后续查询的连接不是同一个库（no such table）。
     let pool = AnyPoolOptions::new()
-        .max_connections(5)
+        .max_connections(1)
         .connect("sqlite::memory:")
         .await
         .expect("failed to connect to in-memory sqlite");

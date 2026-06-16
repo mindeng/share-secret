@@ -86,7 +86,12 @@ by the URL scheme — the only place that branches:
   `Share.created_at: String` under Any on both backends — no model change.
 
 `init_db_memory()` (tests) stays SQLite in-memory but returns an `AnyPool`, and
-also goes through the `Once`-guarded driver install.
+also goes through the `Once`-guarded driver install. It must use
+`max_connections(1)`: each `sqlite::memory:` connection is an independent
+in-memory database, so a multi-connection pool would create the schema on one
+connection and run queries on empty ones ("no such table"). A single connection
+keeps the schema and queries on the same DB and preserves per-test isolation
+(each `init_db_memory()` call gets its own private in-memory DB).
 
 Backend detection is by URL scheme: a `postgres://` or `postgresql://` prefix
 means Postgres; anything else (i.e. `sqlite:`) means SQLite.
