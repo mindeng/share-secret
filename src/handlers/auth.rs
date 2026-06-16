@@ -50,15 +50,16 @@ pub async fn register_code(
     State(state): State<Arc<AppState>>,
     Form(form): Form<CodeForm>,
 ) -> Json<CodeResponse> {
-    if form.username.trim().is_empty() {
+    let username = form.username.trim();
+    if username.is_empty() {
         return Json(CodeResponse {
             ok: false,
             message: "请先填写用户名".to_string(),
         });
     }
-    match state.codes.issue(&form.username) {
+    match state.codes.issue(username) {
         Ok(code) => {
-            println!("[验证码] 用户 {} 的注册验证码: {}", form.username, code);
+            println!("[验证码] 用户 {username} 的注册验证码: {code}");
             Json(CodeResponse {
                 ok: true,
                 message: "验证码已打印到服务器控制台".to_string(),
@@ -85,13 +86,14 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Form(form): Form<RegisterForm>,
 ) -> Result<Redirect, RegisterTemplate> {
-    if form.username.is_empty() || form.password.is_empty() {
+    let username = form.username.trim();
+    if username.is_empty() || form.password.is_empty() {
         return Err(RegisterTemplate {
             error: Some("用户名和密码不能为空".to_string()),
         });
     }
 
-    if let Err(e) = state.codes.verify(&form.username, &form.code) {
+    if let Err(e) = state.codes.verify(username, &form.code) {
         return Err(RegisterTemplate {
             error: Some(code_error_message(e)),
         });
@@ -99,7 +101,7 @@ pub async fn register(
 
     let password_hash = hash_password(&form.password);
     let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES (?, ?)")
-        .bind(&form.username)
+        .bind(username)
         .bind(&password_hash)
         .execute(&state.db)
         .await;
