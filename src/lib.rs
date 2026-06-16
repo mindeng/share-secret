@@ -22,13 +22,12 @@ pub fn build_app(db: sqlx::SqlitePool) -> Router {
     let state = Arc::new(AppState { db });
 
     let session_store = MemoryStore::default();
-    // Cookies are marked `Secure` only when explicitly enabled (e.g. behind an
-    // HTTPS-terminating proxy). The app is served over plain HTTP by default, and
-    // browsers drop `Secure` cookies on non-localhost HTTP — which would lose the
-    // session right after login. Default off; set SECURE_COOKIES=true under HTTPS.
+    // Session cookies are marked `Secure` by default (safe for HTTPS deployments).
+    // For plain-HTTP local development, set SECURE_COOKIES=false — otherwise browsers
+    // drop the cookie on non-localhost HTTP and the session is lost right after login.
     let secure_cookies = std::env::var("SECURE_COOKIES")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true);
     let session_layer = SessionManagerLayer::new(session_store).with_secure(secure_cookies);
 
     Router::new()
