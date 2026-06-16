@@ -276,7 +276,7 @@ pub async fn init_postgres_schema(pool: &AnyPool) {
             id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (now())::text
+            created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
         )",
     )
     .execute(pool)
@@ -290,7 +290,7 @@ pub async fn init_postgres_schema(pool: &AnyPool) {
             slug TEXT UNIQUE NOT NULL,
             encrypted_payload TEXT NOT NULL,
             kdf_salt TEXT,
-            created_at TEXT NOT NULL DEFAULT (now())::text
+            created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
         )",
     )
     .execute(pool)
