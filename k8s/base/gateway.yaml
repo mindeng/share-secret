@@ -10,23 +10,23 @@ spec:
   #   - Istio:                             istio
   #   - Envoy Gateway:                     eg
   # Run `kubectl get gatewayclass` and set the matching name here.
-  gatewayClassName: REPLACE_WITH_YOUR_GATEWAYCLASS
+  gatewayClassName: traefik
   listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
+    # - name: http
+    #   protocol: HTTP
+    #   port: 80
+    #   allowedRoutes:
+    #     namespaces:
+    #       from: Same
+    # Terminate TLS here once you have a cert Secret. Then add an HTTPS listener:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: ${APP_DOMAIN}
       allowedRoutes:
         namespaces:
           from: Same
-    # Terminate TLS here once you have a cert Secret. Then add an HTTPS listener:
-    # - name: https
-    #   protocol: HTTPS
-    #   port: 443
-    #   hostname: ${APP_DOMAIN}
-    #   tls:
-    #     mode: Terminate
-    #     certificateRefs:
-    #       - name: share-secret-tls
-    #     allowedRoutes:
-    #       namespaces:
-    #         from: Same
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: share-secret-tls
