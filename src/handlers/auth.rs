@@ -121,26 +121,34 @@ pub async fn login(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Result<Redirect, LoginTemplate> {
-    let row: Option<(i64, String)> = sqlx::query_as(
-        "SELECT id, password_hash FROM users WHERE username = ?",
-    )
-    .bind(&form.username)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|_| {
-        LoginTemplate {
-            error: Some("数据库错误".to_string()),
-        }
-    })?;
+    if let Err(remaining) = state.login_guard.check(&form.username) {
+        let mins = remaining.as_secs() / 60 + 1;
+        return Err(LoginTemplate {
+            error: Some(format!("尝试过于频繁，请 {mins} 分钟后再试")),
+        });
+    }
+
+    let row: Option<(i64, String)> =
+        sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
+            .bind(&form.username)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|_| LoginTemplate {
+                error: Some("数据库错误".to_string()),
+            })?;
 
     match row {
         Some((id, hash)) if verify_password(&form.password, &hash) => {
+            state.login_guard.record_success(&form.username);
             login_user(&session, id).await;
             Ok(Redirect::to("/dashboard"))
         }
-        _ => Err(LoginTemplate {
-            error: Some("用户名或密码错误".to_string()),
-        }),
+        _ => {
+            state.login_guard.record_failure(&form.username);
+            Err(LoginTemplate {
+                error: Some("用户名或密码错误".to_string()),
+            })
+        }
     }
 }
 
