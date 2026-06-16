@@ -6,3 +6,5 @@ target
 # editor swap files
 *.swp
 *.swo
+/.env
+/.envrc
