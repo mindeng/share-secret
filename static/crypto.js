@@ -90,3 +90,40 @@ async function createShare(payload, password) {
     const { slug } = await res.json();
     return { slug, key, passwordProtected: !!password };
 }
+
+// 编辑已有分享：
+// - password 非空 → 切换/设置为密码模式（新 salt + 派生密钥）
+// - password 为空且原本是链接模式 → 复用原密钥（已分享的链接继续有效）
+// - password 为空且原本是密码模式 → 切换为链接模式（生成新密钥）
+// existing: { mode: 'link' | 'password', key: rawKeyB64 | null }
+async function updateShare(slug, payload, password, existing) {
+    let key = null;
+    let kdfSalt = null;
+    let cryptoKey;
+
+    if (password) {
+        kdfSalt = generateSalt();
+        cryptoKey = await deriveKeyFromPassword(password, kdfSalt);
+    } else if (existing.mode === 'link' && existing.key) {
+        key = existing.key;
+        cryptoKey = await importRawKey(key);
+    } else {
+        key = generateKey();
+        cryptoKey = await importRawKey(key);
+    }
+
+    const encryptedPayload = await encryptWithKey(cryptoKey, payload);
+
+    const res = await fetch(`/api/shares/${slug}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encrypted_payload: encryptedPayload, kdf_salt: kdfSalt })
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || '更新失败');
+    }
+
+    return { key, passwordProtected: !!password };
+}
