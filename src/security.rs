@@ -149,14 +149,14 @@ impl LoginGuard {
     pub fn check(&self, key: &str) -> Result<(), Duration> {
         let now = Instant::now();
         let mut map = self.inner.lock().expect("login lock");
-        if let Some(a) = map.get_mut(key) {
-            if let Some(until) = a.locked_until {
-                if now < until {
-                    return Err(until - now);
-                }
-                a.failures = 0;
-                a.locked_until = None;
+        if let Some(a) = map.get_mut(key)
+            && let Some(until) = a.locked_until
+        {
+            if now < until {
+                return Err(until - now);
             }
+            a.failures = 0;
+            a.locked_until = None;
         }
         Ok(())
     }
