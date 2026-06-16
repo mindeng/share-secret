@@ -52,7 +52,7 @@ pub async fn create_share(
 
     let mut slug = generate_slug();
     for attempt in 0..10 {
-        let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM shares WHERE slug = ?")
+        let exists = sqlx::query("SELECT 1 FROM shares WHERE slug = $1")
             .bind(&slug)
             .fetch_optional(&state.db)
             .await?
@@ -66,7 +66,7 @@ pub async fn create_share(
         slug = generate_slug();
     }
 
-    sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt) VALUES ($1, $2, $3, $4)")
         .bind(user.id)
         .bind(&slug)
         .bind(&req.encrypted_payload)
@@ -88,7 +88,7 @@ pub async fn update_share(
     }
 
     let result = sqlx::query(
-        "UPDATE shares SET encrypted_payload = ?, kdf_salt = ? WHERE slug = ? AND user_id = ?",
+        "UPDATE shares SET encrypted_payload = $1, kdf_salt = $2 WHERE slug = $3 AND user_id = $4",
     )
     .bind(&req.encrypted_payload)
     .bind(&req.kdf_salt)
@@ -109,7 +109,7 @@ pub async fn delete_share(
     CurrentUser(user): CurrentUser,
     Path(id): Path<i64>,
 ) -> Result<Redirect, AppError> {
-    let result = sqlx::query("DELETE FROM shares WHERE id = ? AND user_id = ?")
+    let result = sqlx::query("DELETE FROM shares WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user.id)
         .execute(&state.db)
@@ -132,7 +132,7 @@ pub async fn get_share_payload(
     Path(slug): Path<String>,
 ) -> Result<Json<SharePayloadResponse>, AppError> {
     let row: Option<(i64, String, Option<String>)> =
-        sqlx::query_as("SELECT user_id, encrypted_payload, kdf_salt FROM shares WHERE slug = ?")
+        sqlx::query_as("SELECT user_id, encrypted_payload, kdf_salt FROM shares WHERE slug = $1")
             .bind(&slug)
             .fetch_optional(&state.db)
             .await?;

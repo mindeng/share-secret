@@ -70,7 +70,7 @@ impl FromRequestParts<Arc<AppState>> for CurrentUser {
         let user_id = user_id.ok_or(AppError::Auth("未登录"))?;
 
         let user: User =
-            sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = ?")
+            sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1")
                 .bind(user_id)
                 .fetch_one(&state.db)
                 .await

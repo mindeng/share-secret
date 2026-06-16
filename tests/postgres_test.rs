@@ -33,7 +33,7 @@ async fn spike_any_postgres_placeholders_and_types() {
     .unwrap();
 
     // INSERT with `?` placeholders — Any must rewrite to $1, $2 for Postgres.
-    sqlx::query("INSERT INTO spike_t (name, note) VALUES (?, ?)")
+    sqlx::query("INSERT INTO spike_t (name, note) VALUES ($1, $2)")
         .bind("alice")
         .bind(Option::<String>::None)
         .execute(&pool)
@@ -42,7 +42,7 @@ async fn spike_any_postgres_placeholders_and_types() {
 
     // SELECT back with a `?` placeholder and decode i64 + String + Option<String>.
     let row: (i64, String, Option<String>) =
-        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = ?")
+        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = $1")
             .bind("alice")
             .fetch_one(&pool)
             .await

@@ -100,7 +100,7 @@ pub async fn register(
     }
 
     let password_hash = hash_password(&form.password);
-    let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES (?, ?)")
+    let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2)")
         .bind(username)
         .bind(&password_hash)
         .execute(&state.db)
@@ -133,7 +133,7 @@ pub async fn login(
     }
 
     let row: Option<(i64, String)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
+        sqlx::query_as("SELECT id, password_hash FROM users WHERE username = $1")
             .bind(username)
             .fetch_optional(&state.db)
             .await
