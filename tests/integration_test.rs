@@ -658,3 +658,23 @@ async fn test_dashboard_shows_export_import_controls() {
     assert!(body.contains("/api/shares/export"), "export link missing: {body}");
     assert!(body.contains("导入"), "import control missing: {body}");
 }
+
+#[tokio::test]
+async fn test_dashboard_renders_with_a_share() {
+    // Regression: the dashboard query selects created_at into a String. Under
+    // sqlx's Any driver a SQLite DATETIME column won't decode as String without
+    // CAST(... AS TEXT) — so a dashboard that actually has a share must not 500.
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "dash_user").await;
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"dash-cipher"}"#).await;
+
+    let req = Request::builder()
+        .uri("/dashboard")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    assert!(body.contains(&slug), "rendered dashboard should list the share slug: {body}");
+}
