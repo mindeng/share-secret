@@ -3,7 +3,12 @@ use crate::crypto::generate_slug;
 use crate::error::AppError;
 use crate::AppState;
 use askama::Template;
-use axum::{extract::{Path, State}, http::StatusCode, response::{Html, Redirect}, Json};
+use axum::{
+    extract::{Path, State},
+    http::{header, StatusCode},
+    response::{Html, IntoResponse, Redirect},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_sessions::Session;
@@ -33,6 +38,27 @@ pub struct SharePayload {
 #[derive(Debug, Serialize)]
 pub struct CreateShareResponse {
     pub slug: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ExportShare {
+    pub slug: String,
+    pub encrypted_payload: String,
+    pub kdf_salt: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportEnvelope {
+    pub version: i32,
+    pub shares: Vec<ExportShare>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportSummary {
+    pub imported: usize,
+    pub skipped: usize,
+    pub errors: usize,
 }
 
 pub async fn new_share_page(
@@ -144,4 +170,41 @@ pub async fn get_share_payload(
         }
         None => Err(AppError::NotFound),
     }
+}
+
+pub async fn export_shares(
+    State(state): State<Arc<AppState>>,
+    CurrentUser(user): CurrentUser,
+) -> Result<impl IntoResponse, AppError> {
+    let rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT slug, encrypted_payload, kdf_salt, CAST(created_at AS TEXT) FROM shares WHERE user_id = $1 ORDER BY created_at",
+    )
+    .bind(user.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let shares: Vec<ExportShare> = rows
+        .into_iter()
+        .map(|(slug, encrypted_payload, kdf_salt, created_at)| ExportShare {
+            slug,
+            encrypted_payload,
+            kdf_salt,
+            created_at,
+        })
+        .collect();
+
+    let envelope = ExportEnvelope { version: 1, shares };
+    // Serializing owned plain structs to a String is infallible.
+    let body = serde_json::to_string(&envelope).expect("serialize export envelope");
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"share-secret-export.json\"",
+            ),
+        ],
+        body,
+    ))
 }

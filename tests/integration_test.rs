@@ -465,3 +465,47 @@ async fn test_update_sets_and_clears_kdf_salt() {
     assert!(v["kdf_salt"].is_null());
     assert_eq!(v["encrypted_payload"].as_str(), Some("c2"));
 }
+
+#[tokio::test]
+async fn test_export_returns_only_own_shares() {
+    let (app, state) = make_app().await;
+
+    let alice = register_and_login(&app, &state, "exp_alice").await;
+    let bob = register_and_login(&app, &state, "exp_bob").await;
+
+    let alice_slug = create_share_with(&app, &alice, r#"{"encrypted_payload":"alice-cipher"}"#).await;
+    let _bob_slug = create_share_with(&app, &bob, r#"{"encrypted_payload":"bob-cipher"}"#).await;
+
+    // alice exports
+    let req = Request::builder()
+        .uri("/api/shares/export")
+        .header("cookie", alice.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-disposition").unwrap(),
+        "attachment; filename=\"share-secret-export.json\""
+    );
+
+    let env: serde_json::Value =
+        serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(env["version"].as_i64(), Some(1));
+    let shares = env["shares"].as_array().unwrap();
+    assert_eq!(shares.len(), 1);
+    assert_eq!(shares[0]["slug"].as_str(), Some(alice_slug.as_str()));
+    assert_eq!(shares[0]["encrypted_payload"].as_str(), Some("alice-cipher"));
+    assert!(shares[0]["created_at"].is_string());
+}
+
+#[tokio::test]
+async fn test_export_requires_auth() {
+    let (app, _state) = make_app().await;
+    let req = Request::builder()
+        .uri("/api/shares/export")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
