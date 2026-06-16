@@ -424,3 +424,44 @@ async fn test_update_rejects_empty_payload() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn test_update_sets_and_clears_kdf_salt() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "saltupd").await;
+    // start as a link-mode share (no salt)
+    let slug = create_share_with(&app, &cookie, r#"{"encrypted_payload":"orig"}"#).await;
+
+    // update -> password mode (sets a salt)
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"c1","kdf_salt":"c2FsdHk="}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder().uri(format!("/api/shares/{slug}")).body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["kdf_salt"].as_str(), Some("c2FsdHk="));
+
+    // update -> back to link mode (clears the salt)
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/shares/{slug}/update"))
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"c2"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder().uri(format!("/api/shares/{slug}")).body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert!(v["kdf_salt"].is_null());
+    assert_eq!(v["encrypted_payload"].as_str(), Some("c2"));
+}
