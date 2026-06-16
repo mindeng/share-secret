@@ -6,11 +6,13 @@
 <h1>查看分享</h1>
 <div id="loading">正在加载...</div>
 <div id="error" style="display:none; color: red;"></div>
+
 <div id="content" style="display:none;">
     <h2 id="title"></h2>
     <table>
         <tbody id="fields"></tbody>
     </table>
+    <button type="button" id="edit-btn" style="display:none; width:auto; margin-top:1rem;">编辑</button>
 </div>
 
 <div id="password-prompt" style="display:none; background:white; padding:1rem; border-radius:8px;">
@@ -20,9 +22,33 @@
     <p id="password-error" style="color:red; display:none;">密码错误，请重试</p>
 </div>
 
+<form id="edit-form" style="display:none; margin-top:1rem;">
+    <label>标题 <input type="text" id="edit-title" required></label>
+    <div id="edit-fields"></div>
+    <button type="button" id="edit-add-field" style="margin-bottom:1rem;">添加字段</button>
+    <label>查看密码（可选，留空则用带密钥的链接分享）
+        <input type="password" id="edit-view-password" autocomplete="new-password">
+    </label>
+    <button type="submit">保存修改</button>
+    <button type="button" id="edit-cancel" style="width:auto;">取消</button>
+</form>
+
+<div id="edit-result" style="display:none; margin-top:1rem; background:white; padding:1rem; border-radius:8px;">
+    <p>已保存。分享链接：</p>
+    <input type="text" id="edit-link" readonly>
+    <button type="button" id="edit-copy-link">复制链接</button>
+    <p id="edit-password-hint" style="display:none; color:#b45309; margin-top:0.75rem;">
+        ⚠ 此分享受密码保护。请通过其它安全渠道把查看密码告诉对方，链接本身不含密钥。
+    </p>
+</div>
+
 <script src="/static/crypto.js"></script>
 <script>
-    const slug = window.location.pathname.split('/').pop();
+    const slug = window.location.pathname.split('/').filter(Boolean).pop();
+    let currentPayload = null;
+    let currentMode = null;   // 'link' | 'password'
+    let currentKey = null;    // rawKeyB64 when link mode
+    let isOwner = false;
 
     function showError(msg) {
         document.getElementById('loading').style.display = 'none';
@@ -32,14 +58,16 @@
     }
 
     function renderPayload(payload) {
+        currentPayload = payload;
         document.getElementById('loading').style.display = 'none';
         document.getElementById('password-prompt').style.display = 'none';
+        document.getElementById('edit-form').style.display = 'none';
         document.getElementById('content').style.display = 'block';
         document.getElementById('title').textContent = payload.title;
 
         const tbody = document.getElementById('fields');
         tbody.replaceChildren();
-        payload.fields.forEach(field => {
+        (payload.fields || []).forEach(field => {
             const tr = document.createElement('tr');
 
             const labelTd = document.createElement('td');
@@ -69,7 +97,115 @@
             tr.appendChild(btnTd);
             tbody.appendChild(tr);
         });
+
+        document.getElementById('edit-btn').style.display = isOwner ? 'inline-block' : 'none';
     }
+
+    // 用 DOM API 构造可编辑字段行（不使用 innerHTML，避免 XSS）
+    function addEditFieldRow(label, value) {
+        const div = document.createElement('div');
+        div.className = 'edit-field';
+
+        const labelWrap = document.createElement('label');
+        labelWrap.append('字段名 ');
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.className = 'edit-label';
+        labelInput.required = true;
+        labelInput.value = label || '';
+        labelWrap.appendChild(labelInput);
+
+        const valueWrap = document.createElement('label');
+        valueWrap.append('值 ');
+        const valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.className = 'edit-value';
+        valueInput.required = true;
+        valueInput.value = value || '';
+        valueWrap.appendChild(valueInput);
+
+        div.appendChild(labelWrap);
+        div.appendChild(valueWrap);
+        document.getElementById('edit-fields').appendChild(div);
+    }
+
+    function openEditForm() {
+        document.getElementById('content').style.display = 'none';
+        document.getElementById('edit-result').style.display = 'none';
+        document.getElementById('edit-title').value = currentPayload.title || '';
+        const ef = document.getElementById('edit-fields');
+        ef.replaceChildren();
+        const fields = currentPayload.fields || [];
+        if (fields.length === 0) {
+            addEditFieldRow('', '');
+        } else {
+            fields.forEach(f => addEditFieldRow(f.label, f.value));
+        }
+        document.getElementById('edit-view-password').value = '';
+        document.getElementById('edit-form').style.display = 'block';
+    }
+
+    document.getElementById('edit-btn').addEventListener('click', openEditForm);
+    document.getElementById('edit-add-field').addEventListener('click', () => addEditFieldRow('', ''));
+    document.getElementById('edit-cancel').addEventListener('click', () => {
+        document.getElementById('edit-form').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+    });
+
+    document.getElementById('edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = e.submitter || e.target.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+        const title = document.getElementById('edit-title').value;
+        const password = document.getElementById('edit-view-password').value;
+        const fields = [];
+        document.querySelectorAll('#edit-fields .edit-field').forEach(el => {
+            fields.push({
+                label: el.querySelector('.edit-label').value,
+                value: el.querySelector('.edit-value').value,
+            });
+        });
+        const payload = { title, fields };
+
+        try {
+            const { key, passwordProtected } = await updateShare(
+                slug, payload, password, { mode: currentMode, key: currentKey }
+            );
+
+            if (passwordProtected) {
+                currentMode = 'password';
+                currentKey = null;
+                history.replaceState(null, '', `/s/${slug}`);
+            } else {
+                currentMode = 'link';
+                currentKey = key;
+                history.replaceState(null, '', `/s/${slug}#key=${key}`);
+            }
+
+            renderPayload(payload);
+
+            const link = passwordProtected
+                ? `${window.location.origin}/s/${slug}`
+                : `${window.location.origin}/s/${slug}#key=${key}`;
+            document.getElementById('edit-link').value = link;
+            document.getElementById('edit-password-hint').style.display = passwordProtected ? 'block' : 'none';
+            document.getElementById('edit-result').style.display = 'block';
+        } catch (err) {
+            alert('保存失败：' + err.message);
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    });
+
+    document.getElementById('edit-copy-link').addEventListener('click', () => {
+        const input = document.getElementById('edit-link');
+        input.select();
+        navigator.clipboard.writeText(input.value).then(() => {
+            const btn = document.getElementById('edit-copy-link');
+            btn.textContent = '已复制';
+            setTimeout(() => btn.textContent = '复制链接', 1500);
+        });
+    });
 
     (async () => {
         let data;
@@ -82,6 +218,8 @@
             return;
         }
 
+        isOwner = !!data.is_owner;
+
         if (data.kdf_salt) {
             document.getElementById('loading').style.display = 'none';
             document.getElementById('password-prompt').style.display = 'block';
@@ -92,6 +230,8 @@
                 try {
                     const cryptoKey = await deriveKeyFromPassword(password, data.kdf_salt);
                     const payload = await decryptWithKey(cryptoKey, data.encrypted_payload);
+                    currentMode = 'password';
+                    currentKey = null;
                     renderPayload(payload);
                 } catch (e) {
                     document.getElementById('password-error').style.display = 'block';
@@ -113,6 +253,8 @@
         try {
             const cryptoKey = await importRawKey(keyMatch[1]);
             const payload = await decryptWithKey(cryptoKey, data.encrypted_payload);
+            currentMode = 'link';
+            currentKey = keyMatch[1];
             renderPayload(payload);
         } catch (e) {
             showError('无法解密，请检查链接是否完整');
