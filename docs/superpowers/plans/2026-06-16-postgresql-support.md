@@ -4,7 +4,7 @@
 
 **Goal:** Add PostgreSQL as a runtime-selectable database backend alongside SQLite, chosen by the `DATABASE_URL` scheme, from a single binary.
 
-**Architecture:** Switch `AppState.db` from `SqlitePool` to `sqlx::AnyPool`. Queries keep their portable `?` placeholders (the Any driver rewrites them to `$1` for Postgres). Only the schema DDL branches per backend, selected by URL scheme. A spike proves Any↔Postgres before the app is migrated; SQLite remains the in-memory test backend.
+**Architecture:** Switch `AppState.db` from `SqlitePool` to `sqlx::AnyPool`. Queries use `$1 … $n` placeholders, which run on BOTH SQLite and Postgres through Any (a spike proved Any does NOT translate `?`, but `$1` works natively on both). Only the schema DDL branches per backend, selected by URL scheme. SQLite remains the in-memory test backend.
 
 **Tech Stack:** Rust, axum 0.7, sqlx 0.8 (`any` + `sqlite` + `postgres` + `tls-rustls`), tower-sessions.
 
@@ -16,6 +16,7 @@ This is a zero-knowledge secret-sharing app. The server stores only ciphertext. 
 
 Key facts you must respect:
 - The Any driver requires `sqlx::any::install_default_drivers()` to be called **once** per process before any pool connects (a second call errors). We centralize this behind a `std::sync::Once` helper `share_secret::db::install_drivers_once()`.
+- **Placeholders must be `$1 … $n`, not `?`.** The Task 1 spike proved the Any driver does NOT translate `?` (Postgres rejects it with a syntax error). SQLite natively supports `$NNN` parameters and sqlx binds them positionally, so `$1`-style queries run on both backends. Every query is written with `$1 … $n`.
 - Postgres types the SQL literal `1` as `int4`, which fails to decode as `i64` under Any. The existing slug-existence check `query_scalar::<_, i64>("SELECT 1 …")` must become a row-presence check.
 - `created_at` must be a `TEXT` column on Postgres (not `TIMESTAMP`) so it keeps decoding into `Share.created_at: String`.
 - The Dockerfile builds with `--locked`, so `Cargo.lock` changes must be committed.
@@ -324,9 +325,63 @@ pub fn build_app(db: sqlx::AnyPool) -> Router {
 
 (No other changes in `lib.rs`. `main.rs` needs no change — `db::init_db()` now returns `AnyPool` and `build_app` accepts it.)
 
-- [ ] **Step 3: Fix the slug-existence check in `src/handlers/share.rs`**
+- [ ] **Step 3: Convert every query's placeholders from `?` to `$1 … $n`**
 
-Replace the existence check (lines 53-58) — currently:
+Make these exact edits (numbering follows bind order at each call site):
+
+`src/auth.rs` — the `CurrentUser` lookup:
+```rust
+// from:
+sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = ?")
+// to:
+sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1")
+```
+
+`src/handlers/auth.rs` — the register INSERT and the login lookup:
+```rust
+// from:
+sqlx::query("INSERT INTO users (username, password_hash) VALUES (?, ?)")
+// to:
+sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2)")
+
+// from:
+sqlx::query_as("SELECT id, password_hash FROM users WHERE username = ?")
+// to:
+sqlx::query_as("SELECT id, password_hash FROM users WHERE username = $1")
+```
+
+`src/handlers/share.rs` — the INSERT, UPDATE, DELETE, and payload SELECT:
+```rust
+// from:
+sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt) VALUES (?, ?, ?, ?)")
+// to:
+sqlx::query("INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt) VALUES ($1, $2, $3, $4)")
+
+// from:
+        "UPDATE shares SET encrypted_payload = ?, kdf_salt = ? WHERE slug = ? AND user_id = ?",
+// to:
+        "UPDATE shares SET encrypted_payload = $1, kdf_salt = $2 WHERE slug = $3 AND user_id = $4",
+
+// from:
+sqlx::query("DELETE FROM shares WHERE id = ? AND user_id = ?")
+// to:
+sqlx::query("DELETE FROM shares WHERE id = $1 AND user_id = $2")
+
+// from:
+        sqlx::query_as("SELECT user_id, encrypted_payload, kdf_salt FROM shares WHERE slug = ?")
+// to:
+        sqlx::query_as("SELECT user_id, encrypted_payload, kdf_salt FROM shares WHERE slug = $1")
+```
+
+`src/handlers/dashboard.rs` — the dashboard listing:
+```rust
+// from:
+        "SELECT id, user_id, slug, encrypted_payload, kdf_salt, created_at FROM shares WHERE user_id = ? ORDER BY created_at DESC",
+// to:
+        "SELECT id, user_id, slug, encrypted_payload, kdf_salt, created_at FROM shares WHERE user_id = $1 ORDER BY created_at DESC",
+```
+
+Then the slug-existence check in `src/handlers/share.rs` (lines 53-58) changes from a typed scalar to a row-presence check (Postgres types `1` as `int4`, which won't decode as `i64` under Any). Currently:
 
 ```rust
         let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM shares WHERE slug = ?")
@@ -336,26 +391,48 @@ Replace the existence check (lines 53-58) — currently:
             .is_some();
 ```
 
-with a row-presence check (Postgres types `1` as `int4`, which won't decode as `i64` under Any):
+becomes:
 
 ```rust
-        let exists = sqlx::query("SELECT 1 FROM shares WHERE slug = ?")
+        let exists = sqlx::query("SELECT 1 FROM shares WHERE slug = $1")
             .bind(&slug)
             .fetch_optional(&state.db)
             .await?
             .is_some();
 ```
 
+- [ ] **Step 3b: Update the Task 1 spike test to the `$1` convention**
+
+In `tests/postgres_test.rs`, change the spike's two SQL statements to use Postgres-native placeholders (this is what the chosen convention proved works):
+
+```rust
+// from:
+    sqlx::query("INSERT INTO spike_t (name, note) VALUES (?, ?)")
+// to:
+    sqlx::query("INSERT INTO spike_t (name, note) VALUES ($1, $2)")
+
+// from:
+        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = ?")
+// to:
+        sqlx::query_as("SELECT id, name, note FROM spike_t WHERE name = $1")
+```
+
 - [ ] **Step 4: Run the full suite on SQLite-via-Any**
 
 Run: `cargo test`
-Expected: PASS — all 27 existing tests pass through `AnyPool`, and `postgres_test` skips. This is the key checkpoint proving Any works for SQLite end-to-end.
+Expected: PASS — all 27 existing tests pass through `AnyPool`. This is the key checkpoint proving the `$1` queries work for SQLite end-to-end.
+
+- [ ] **Step 4b: Run the spike against the real Postgres**
+
+A throwaway Postgres is running locally. Run:
+`TEST_DATABASE_URL=postgres://postgres:postgres@localhost:55432/sharesecret cargo test --test postgres_test -- --nocapture`
+Expected: PASS — `spike_any_postgres_placeholders_and_types` now runs (not skipped) and succeeds, proving the `$1` placeholders + type decoding work against real Postgres.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock src/db.rs src/lib.rs src/handlers/share.rs
-git commit -m "feat: run the database layer on sqlx AnyPool (sqlite + postgres)"
+git add Cargo.toml Cargo.lock src/db.rs src/lib.rs src/handlers/share.rs src/handlers/auth.rs src/auth.rs src/handlers/dashboard.rs tests/postgres_test.rs
+git commit -m "feat: run the database layer on sqlx AnyPool with \$1 placeholders"
 ```
 
 ---
@@ -507,7 +584,7 @@ async fn postgres_end_to_end_flow() {
     assert!(body_string(res.into_body()).await.contains(&slug));
 
     // 删除（按 id；从库里取该 slug 的 BIGINT id，可正常解码为 i64）
-    let id: i64 = sqlx::query_scalar("SELECT id FROM shares WHERE slug = ?")
+    let id: i64 = sqlx::query_scalar("SELECT id FROM shares WHERE slug = $1")
         .bind(&slug)
         .fetch_one(&state.db)
         .await
@@ -532,14 +609,15 @@ async fn postgres_end_to_end_flow() {
 }
 ```
 
-- [ ] **Step 2: Run the gated test (skips without Postgres)**
+- [ ] **Step 2: Run the gated test against the real local Postgres**
 
+A throwaway Postgres is running locally. Run:
+`TEST_DATABASE_URL=postgres://postgres:postgres@localhost:55432/sharesecret cargo test --test postgres_test -- --nocapture`
+Expected: PASS — both `spike_…` and `postgres_end_to_end_flow` run (not skipped) and succeed against real Postgres.
+
+Also confirm it still skips cleanly with no URL:
 Run: `cargo test --test postgres_test`
-Expected: PASS — both `spike_…` and `postgres_end_to_end_flow` print skip messages and return (0 failures), confirming the file compiles and skips cleanly.
-
-If Postgres is available:
-Run: `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo test --test postgres_test -- --nocapture`
-Expected: PASS — full flow runs against Postgres.
+Expected: PASS — both tests print skip messages and return (0 failures).
 
 - [ ] **Step 3: Run the entire suite once more**
 
@@ -626,4 +704,4 @@ git commit -m "docs: document DATABASE_URL backends and Postgres tests"
 
 - [ ] `cargo test` — 27 SQLite tests pass; Postgres tests skip. Expected: green.
 - [ ] `cargo build --release` — clean production build. Expected: success.
-- [ ] (If a Postgres instance is available) `TEST_DATABASE_URL=postgres://… cargo test --test postgres_test -- --nocapture` — full Postgres flow passes.
+- [ ] `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:55432/sharesecret cargo test --test postgres_test -- --nocapture` — full Postgres flow passes against the real local Postgres.

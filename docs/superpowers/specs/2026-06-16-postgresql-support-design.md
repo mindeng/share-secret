@@ -11,18 +11,34 @@ SQLite support, from a single binary. The backend is chosen by the
 SQLite stays — it backs the fast in-memory test suite and simple/local
 deployments — and PostgreSQL becomes an alternative for production use.
 
-## Approach: sqlx `Any` driver
+## Approach: sqlx `Any` driver with `$1` placeholders
 
-The app already uses runtime queries (`sqlx::query` / `query_as` with `?`
-placeholders) and no `query!` compile-time macros, so the `Any` driver fits the
-existing style with essentially no query rewrites. Every column type in use
-(`i64`, `String`, `Option<String>`) is within Any's supported type subset.
+The app uses runtime queries (`sqlx::query` / `query_as`) and no `query!`
+compile-time macros, so the `Any` driver fits the existing style. Every column
+type in use (`i64`, `String`, `Option<String>`) is within Any's supported type
+subset, and the backend is selected at runtime from the `DATABASE_URL` scheme.
 
-The chief risk — whether Any reliably rewrites `?`→`$1` for Postgres — is
-de-risked by making the first implementation step a spike that proves the
-behavior against a real Postgres before any handler is touched. If the spike
-fails, we fall back to an enum/repository abstraction (per-backend native SQL),
-having rewritten nothing.
+### Spike finding (2026-06-16) — placeholder convention
+
+A spike run against a real Postgres (Task 1) established two facts that shape
+the approach:
+
+- **Any does NOT translate `?` placeholders.** It passes them through to the
+  native driver. Postgres rejects `?` with a syntax error; SQLite accepts `?`
+  only because it is SQLite's native syntax. So a single query written with `?`
+  cannot run on both backends.
+- **Postgres-style `$1` placeholders work on BOTH backends via Any** — SQLite
+  natively supports `$NNN` named parameters and sqlx binds them positionally.
+  Any's type decoding on Postgres was also verified (`BIGINT`→`i64`,
+  `TEXT`→`String`, `NULL`→`Option::None`).
+
+**Decision:** write every query with `$1 … $n` placeholders. One query string
+then runs on both backends through a single `AnyPool` — no runtime placeholder
+translation, no per-backend SQL duplication, no backend flag. This supersedes
+the original assumption that queries could keep `?`. The fallback options
+considered (a runtime `?`→`$n` translator, or a full enum/repository abstraction
+with native pools) proved unnecessary because the unified `$1` form works
+directly.
 
 ## 1. Architecture & dependencies
 
@@ -77,12 +93,23 @@ means Postgres; anything else (i.e. `sqlite:`) means SQLite.
 
 ## 3. Query portability (`src/handlers/*`, `src/auth.rs`)
 
-All 8 queries keep their `?` placeholders unchanged — Any rewrites them to `$1`
-for Postgres. The only change is the slug-existence check in
-`create_share`:
+Every query's placeholders change from `?` to `$1 … $n` (numbered in bind
+order). This single form runs on both backends through the `AnyPool`. The
+affected query sites:
+
+- `src/auth.rs` — `SELECT … FROM users WHERE id = $1`.
+- `src/handlers/auth.rs` — `INSERT INTO users … VALUES ($1, $2)` and
+  `SELECT … FROM users WHERE username = $1`.
+- `src/handlers/share.rs` — the slug-existence check, the share `INSERT`
+  (`$1..$4`), the `UPDATE` (`$1..$4`), the `DELETE` (`$1, $2`), and the
+  payload `SELECT … WHERE slug = $1`.
+- `src/handlers/dashboard.rs` — `SELECT … WHERE user_id = $1 ORDER BY …`.
+
+Additionally, the slug-existence check in `create_share` changes from a typed
+scalar to a row-presence check:
 
 - Today: `sqlx::query_scalar::<_, i64>("SELECT 1 FROM shares WHERE slug = ?")`.
-- Change to row-presence: `sqlx::query("SELECT 1 FROM shares WHERE slug = ?")
+- Change to: `sqlx::query("SELECT 1 FROM shares WHERE slug = $1")
   .bind(&slug).fetch_optional(&state.db).await?.is_some()`.
 
 Reason: Postgres types the literal `1` as `int4`, which would fail to decode as
@@ -91,16 +118,18 @@ backend-neutral.
 
 No other handler logic changes. Structs deriving `sqlx::FromRow` (`User`,
 `Share`) decode from `AnyRow` because their field types are in Any's supported
-set.
+set (verified by the spike).
+
+The naive textual nature of the placeholders is safe here: none of the queries
+contain a literal `?` or `$` inside a string literal.
 
 ## 4. Spike-first + gated Postgres tests (`tests/`)
 
 - **Task 1 — spike (committed as the first gated test):** connect an `AnyPool`
-  to `TEST_DATABASE_URL` (a Postgres URL), run the Postgres DDL, then exercise a
-  representative `?`-placeholder `INSERT` + `SELECT` round-trip. This proves
-  Any's placeholder rewriting and type decoding against real Postgres before the
-  handlers are touched. If it fails: stop and escalate (fall back to the
-  enum/repository approach).
+  to `TEST_DATABASE_URL` (a Postgres URL) and exercise a representative
+  `$1`-placeholder `INSERT` + `SELECT` round-trip, decoding `i64` / `String` /
+  `Option<String>`. This proved the placeholder/type behavior against real
+  Postgres before the handlers were touched (see the Spike finding above).
 - **Gated integration suite:** a test that reads `TEST_DATABASE_URL`; if unset it
   returns early (skips), so the default `cargo test` stays green with zero
   Postgres infra. When set, it drops + recreates the schema, then runs the core
