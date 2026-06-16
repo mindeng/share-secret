@@ -13,7 +13,7 @@ resources:
 images:
 - name: share-secret
   newName: ghcr.io/mindeng/share-secret
-  newTag: sha-78b2146
+  newTag: sha-f12b4d7
 
 patches:
 - path: patch-postgres.yaml
