@@ -59,7 +59,7 @@ pub async fn init_db_memory() -> AnyPool {
 }
 
 /// 每条语句单独执行：Any 驱动不保证支持单次调用里的多语句。
-pub async fn init_sqlite_schema(pool: &AnyPool) {
+pub(crate) async fn init_sqlite_schema(pool: &AnyPool) {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +99,7 @@ pub async fn init_postgres_schema(pool: &AnyPool) {
             id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (now())::text
+            created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
         )",
     )
     .execute(pool)
@@ -113,7 +113,7 @@ pub async fn init_postgres_schema(pool: &AnyPool) {
             slug TEXT UNIQUE NOT NULL,
             encrypted_payload TEXT NOT NULL,
             kdf_salt TEXT,
-            created_at TEXT NOT NULL DEFAULT (now())::text
+            created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
         )",
     )
     .execute(pool)

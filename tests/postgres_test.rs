@@ -4,7 +4,7 @@ use sqlx::any::AnyPoolOptions;
 fn pg_url() -> Option<String> {
     std::env::var("TEST_DATABASE_URL")
         .ok()
-        .filter(|u| u.starts_with("postgres"))
+        .filter(|u| u.starts_with("postgres://") || u.starts_with("postgresql://"))
 }
 
 /// 证明 `$1` 占位符在 Postgres 上经 Any 可用（Any 不会改写 `?`，故统一用 `$1`），
