@@ -9,6 +9,21 @@ async fn body_string(body: Body) -> String {
 }
 
 #[tokio::test]
+async fn test_login_cookie_not_secure_for_http() {
+    // The app is served over plain HTTP, so the session cookie must NOT be
+    // marked `Secure` (browsers drop Secure cookies on non-localhost HTTP),
+    // otherwise the session is lost right after login and pages show "未登录".
+    let db = init_db_memory().await;
+    let app = build_app(db);
+    let cookie = register_and_login(&app, "secitest").await;
+    let s = cookie.to_str().unwrap().to_lowercase();
+    assert!(
+        !s.contains("secure"),
+        "session cookie must not be Secure when serving over HTTP: {s}"
+    );
+}
+
+#[tokio::test]
 async fn test_register_and_login() {
     let db = init_db_memory().await;
     let app = build_app(db);
