@@ -117,6 +117,76 @@ impl Default for CodeStore {
     }
 }
 
+const MAX_LOGIN_FAILURES: u32 = 5;
+const LOGIN_LOCK: Duration = Duration::from_secs(900); // 15 分钟
+
+struct Attempt {
+    failures: u32,
+    locked_until: Option<Instant>,
+}
+
+/// 登录失败锁定（按 key，当前传 username；将来可换 IP）。
+pub struct LoginGuard {
+    max_failures: u32,
+    lock_duration: Duration,
+    inner: Mutex<HashMap<String, Attempt>>,
+}
+
+impl LoginGuard {
+    pub fn new() -> Self {
+        Self::with_params(MAX_LOGIN_FAILURES, LOGIN_LOCK)
+    }
+
+    pub fn with_params(max_failures: u32, lock_duration: Duration) -> Self {
+        Self {
+            max_failures,
+            lock_duration,
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 锁定中返回 `Err(剩余时长)`；锁定已过期则复位并放行。
+    pub fn check(&self, key: &str) -> Result<(), Duration> {
+        let now = Instant::now();
+        let mut map = self.inner.lock().expect("login lock");
+        if let Some(a) = map.get_mut(key) {
+            if let Some(until) = a.locked_until {
+                if now < until {
+                    return Err(until - now);
+                }
+                a.failures = 0;
+                a.locked_until = None;
+            }
+        }
+        Ok(())
+    }
+
+    /// 记一次失败；达上限则设置锁定截止时间。
+    pub fn record_failure(&self, key: &str) {
+        let now = Instant::now();
+        let mut map = self.inner.lock().expect("login lock");
+        let a = map.entry(key.to_string()).or_insert(Attempt {
+            failures: 0,
+            locked_until: None,
+        });
+        a.failures += 1;
+        if a.failures >= self.max_failures {
+            a.locked_until = Some(now + self.lock_duration);
+        }
+    }
+
+    /// 登录成功：清除该 key 的失败记录。
+    pub fn record_success(&self, key: &str) {
+        self.inner.lock().expect("login lock").remove(key);
+    }
+}
+
+impl Default for LoginGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod code_tests {
     use super::*;
@@ -166,5 +236,44 @@ mod code_tests {
         let code = s.issue("erin").unwrap();
         std::thread::sleep(Duration::from_millis(60));
         assert_eq!(s.verify("erin", &code), Err(CodeError::Expired));
+    }
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+
+    fn guard() -> LoginGuard {
+        LoginGuard::with_params(3, Duration::from_secs(900))
+    }
+
+    #[test]
+    fn locks_after_max_failures() {
+        let g = guard();
+        assert!(g.check("alice").is_ok());
+        g.record_failure("alice");
+        g.record_failure("alice");
+        assert!(g.check("alice").is_ok(), "still ok below threshold");
+        g.record_failure("alice"); // 第 3 次 -> 锁定
+        assert!(g.check("alice").is_err(), "locked at threshold");
+    }
+
+    #[test]
+    fn success_clears_failures() {
+        let g = guard();
+        g.record_failure("bob");
+        g.record_failure("bob");
+        g.record_success("bob");
+        // 计数清零后再失败一次不应锁定
+        g.record_failure("bob");
+        assert!(g.check("bob").is_ok());
+    }
+
+    #[test]
+    fn expired_lock_resets() {
+        // 锁定时长设为 0，check 时立即视为已过期并复位
+        let g = LoginGuard::with_params(1, Duration::from_millis(0));
+        g.record_failure("carol"); // 立即锁定，但 lock_duration=0
+        assert!(g.check("carol").is_ok(), "zero-duration lock already expired");
     }
 }
