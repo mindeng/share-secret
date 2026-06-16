@@ -1,0 +1,54 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One in-flight run per ref; a newer push supersedes an older one.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Postgres for the gated integration tests. The default suite ignores it
+    # (those tests self-skip unless TEST_DATABASE_URL is set).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Runs lib unit tests + every integration binary. postgres_test self-skips
+      # here because TEST_DATABASE_URL is unset, so this proves the SQLite path.
+      - name: Test (in-memory SQLite, default)
+        run: cargo test --locked
+
+      # Re-run the Postgres binary, this time pointed at the service container so
+      # the tests actually execute against Postgres instead of skipping.
+      - name: Test (PostgreSQL integration)
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: cargo test --locked --test postgres_test -- --nocapture
