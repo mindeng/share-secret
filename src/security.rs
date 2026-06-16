@@ -162,6 +162,7 @@ impl LoginGuard {
     }
 
     /// 记一次失败；达上限则设置锁定截止时间。
+    /// 约定：调用方应先用 `check` 拦截已锁定的 key，故锁定期内不会再调用本方法。
     pub fn record_failure(&self, key: &str) {
         let now = Instant::now();
         let mut map = self.inner.lock().expect("login lock");
@@ -275,5 +276,14 @@ mod login_tests {
         let g = LoginGuard::with_params(1, Duration::from_millis(0));
         g.record_failure("carol"); // 立即锁定，但 lock_duration=0
         assert!(g.check("carol").is_ok(), "zero-duration lock already expired");
+    }
+
+    #[test]
+    fn locked_check_reports_remaining_time() {
+        let g = LoginGuard::with_params(1, Duration::from_secs(900));
+        g.record_failure("dave");
+        let remaining = g.check("dave").unwrap_err();
+        assert!(remaining <= Duration::from_secs(900));
+        assert!(remaining > Duration::from_secs(890), "remaining should be close to full lock window");
     }
 }
