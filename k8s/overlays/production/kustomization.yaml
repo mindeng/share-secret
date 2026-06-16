@@ -13,4 +13,4 @@ resources:
 images:
 - name: share-secret
   newName: ghcr.io/mindeng/share-secret
-  newTag: sha-5c7414c
+  newTag: sha-d3d432b
