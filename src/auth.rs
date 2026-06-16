@@ -44,6 +44,11 @@ pub async fn logout_user(session: &Session) {
         .expect("remove session");
 }
 
+/// 从 session 读取当前用户 id（未登录返回 None，永不报错）。
+pub async fn current_user_id(session: &Session) -> Option<i64> {
+    session.get::<i64>(USER_ID_KEY).await.ok().flatten()
+}
+
 #[derive(Debug, Clone)]
 pub struct CurrentUser(pub User);
 

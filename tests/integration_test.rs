@@ -265,6 +265,44 @@ async fn test_login_locks_after_failures() {
 }
 
 #[tokio::test]
+async fn test_is_owner_flag() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "owner1").await;
+
+    // owner creates a share
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"encrypted_payload":"orig"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let body = body_string(res.into_body()).await;
+    let slug = serde_json::from_str::<serde_json::Value>(&body).unwrap()["slug"]
+        .as_str().unwrap().to_string();
+
+    // owner fetch -> is_owner true
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["is_owner"].as_bool(), Some(true));
+
+    // anonymous fetch -> is_owner false
+    let req = Request::builder()
+        .uri(format!("/api/shares/{slug}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["is_owner"].as_bool(), Some(false));
+}
+
+#[tokio::test]
 async fn test_login_trims_username() {
     let (app, state) = make_app().await;
     register_user(&app, &state, "ivan", "secret").await;
