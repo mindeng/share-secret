@@ -641,3 +641,20 @@ async fn test_import_requires_auth() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn test_dashboard_shows_export_import_controls() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "ui_user").await;
+
+    let req = Request::builder()
+        .uri("/dashboard")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_string(res.into_body()).await;
+    assert!(body.contains("/api/shares/export"), "export link missing: {body}");
+    assert!(body.contains("导入"), "import control missing: {body}");
+}

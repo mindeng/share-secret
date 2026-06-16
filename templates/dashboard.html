@@ -4,7 +4,13 @@
 
 {% block content %}
 <h1>我的分享</h1>
-<p><a href="/shares/new">创建新分享</a></p>
+<p style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+    <a href="/shares/new">创建新分享</a>
+    <a href="/api/shares/export" download="share-secret-export.json">导出全部</a>
+    <button type="button" id="import-btn" style="width: auto;">导入</button>
+    <input type="file" id="import-file" accept="application/json,.json" style="display: none;">
+</p>
+<p id="import-result" style="color: #555; font-size: 0.875rem;"></p>
 
 {% if shares.is_empty() %}
 <p>暂无分享</p>
@@ -25,4 +31,38 @@
 <form method="post" action="/logout" style="margin-top: 2rem;">
     <button type="submit">登出</button>
 </form>
+<script>
+(function () {
+    const btn = document.getElementById('import-btn');
+    const fileInput = document.getElementById('import-file');
+    const result = document.getElementById('import-result');
+
+    btn.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        result.textContent = '导入中…';
+        try {
+            const envelope = JSON.parse(await file.text());
+            const res = await fetch('/api/shares/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(envelope)
+            });
+            if (!res.ok) {
+                result.textContent = '导入失败：' + (await res.text());
+                return;
+            }
+            const s = await res.json();
+            result.textContent = `导入完成：新增 ${s.imported}，跳过 ${s.skipped}，错误 ${s.errors}`;
+            setTimeout(() => location.reload(), 800);
+        } catch (e) {
+            result.textContent = '导入失败：文件不是有效的 JSON';
+        } finally {
+            fileInput.value = '';
+        }
+    });
+})();
+</script>
 {% endblock %}
