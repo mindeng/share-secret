@@ -21,6 +21,12 @@ pub struct Share {
 pub struct RegisterForm {
     pub username: String,
     pub password: String,
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodeForm {
+    pub username: String,
 }
 
 #[derive(Debug, Deserialize)]
