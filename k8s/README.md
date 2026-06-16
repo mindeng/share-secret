@@ -20,24 +20,21 @@ The CI uses `ghcr.io/<owner>/<repo>` automatically. The placeholder
 `ghcr.io/OWNER/share-secret` in `overlays/production/kustomization.yaml` is
 rewritten by the first successful CI run.
 
-### 2. Pull secret (private packages)
+### 2. Pull access
 
-ghcr packages are **private by default**. Either:
+The ghcr package is **public**, so no pull secret is needed — the cluster pulls
+anonymously and `base/deployment.yaml` has no `imagePullSecrets`.
 
-**Option A — make the package public** (simplest): GitHub → your profile →
-Packages → `share-secret` → Package settings → Change visibility → Public.
-Then remove the `imagePullSecrets` block from `base/deployment.yaml`.
-
-**Option B — keep it private** and create the pull secret in the cluster:
+If you ever switch the package back to private (GitHub → Packages →
+`share-secret` → Package settings → Change visibility), recreate the pull secret
+and re-add `imagePullSecrets: [{name: ghcr-pull}]` to the deployment:
 
 ```bash
-kubectl create namespace share-secret
 kubectl create secret docker-registry ghcr-pull \
   --namespace share-secret \
   --docker-server=ghcr.io \
   --docker-username=<github-username> \
-  --docker-password=<github-PAT-with-read:packages> \
-  --docker-email=<you@example.com>
+  --docker-password=<github-PAT-with-read:packages>
 ```
 
 ### 3. Gateway

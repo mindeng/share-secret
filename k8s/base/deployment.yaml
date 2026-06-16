@@ -18,10 +18,6 @@ spec:
       labels:
         app: share-secret
     spec:
-      # ghcr packages are private by default. Either make the package public, or
-      # create this pull secret (see k8s/README.md) and keep this line.
-      imagePullSecrets:
-        - name: ghcr-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
