@@ -172,6 +172,53 @@ pub async fn get_share_payload(
     }
 }
 
+pub async fn import_shares(
+    State(state): State<Arc<AppState>>,
+    CurrentUser(user): CurrentUser,
+    Json(envelope): Json<ExportEnvelope>,
+) -> Result<Json<ImportSummary>, AppError> {
+    if envelope.version != 1 {
+        return Err(AppError::BadRequest("不支持的导出版本"));
+    }
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = 0usize;
+
+    for share in &envelope.shares {
+        if share.encrypted_payload.is_empty() || share.slug.is_empty() {
+            errors += 1;
+            continue;
+        }
+
+        let exists = sqlx::query("SELECT 1 FROM shares WHERE slug = $1")
+            .bind(&share.slug)
+            .fetch_optional(&state.db)
+            .await?
+            .is_some();
+        if exists {
+            skipped += 1;
+            continue;
+        }
+
+        // created_at is set explicitly to preserve the original timestamp
+        // (the create path lets the DB default it; import must not).
+        sqlx::query(
+            "INSERT INTO shares (user_id, slug, encrypted_payload, kdf_salt, created_at) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(user.id)
+        .bind(&share.slug)
+        .bind(&share.encrypted_payload)
+        .bind(&share.kdf_salt)
+        .bind(&share.created_at)
+        .execute(&state.db)
+        .await?;
+        imported += 1;
+    }
+
+    Ok(Json(ImportSummary { imported, skipped, errors }))
+}
+
 pub async fn export_shares(
     State(state): State<Arc<AppState>>,
     CurrentUser(user): CurrentUser,

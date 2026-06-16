@@ -509,3 +509,135 @@ async fn test_export_requires_auth() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+async fn import_envelope(
+    app: &axum::Router,
+    cookie: &axum::http::HeaderValue,
+    envelope: &str,
+) -> serde_json::Value {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares/import")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(envelope.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    serde_json::from_str(&body_string(res.into_body()).await).unwrap()
+}
+
+#[tokio::test]
+async fn test_import_roundtrip_preserves_slug_payload_created_at_and_owner() {
+    // Source instance: alice creates two shares, then exports.
+    let (app1, state1) = make_app().await;
+    let alice = register_and_login(&app1, &state1, "rt_alice").await;
+    let s1 = create_share_with(&app1, &alice, r#"{"encrypted_payload":"p1","kdf_salt":"c2FsdA=="}"#).await;
+    let s2 = create_share_with(&app1, &alice, r#"{"encrypted_payload":"p2"}"#).await;
+
+    let req = Request::builder()
+        .uri("/api/shares/export")
+        .header("cookie", alice.to_str().unwrap())
+        .body(Body::empty())
+        .unwrap();
+    let res = app1.clone().oneshot(req).await.unwrap();
+    let envelope_json = body_string(res.into_body()).await;
+    let env: serde_json::Value = serde_json::from_str(&envelope_json).unwrap();
+    let orig_created_at = env["shares"]
+        .as_array().unwrap().iter()
+        .find(|s| s["slug"].as_str() == Some(s1.as_str()))
+        .unwrap()["created_at"].as_str().unwrap().to_string();
+
+    // Destination instance (fresh DB = "wiped"): bob imports the envelope.
+    let (app2, state2) = make_app().await;
+    let bob = register_and_login(&app2, &state2, "rt_bob").await;
+
+    let summary = import_envelope(&app2, &bob, &envelope_json).await;
+    assert_eq!(summary["imported"].as_u64(), Some(2));
+    assert_eq!(summary["skipped"].as_u64(), Some(0));
+    assert_eq!(summary["errors"].as_u64(), Some(0));
+
+    // Payload + salt preserved (fetch by the original slug, anonymous read).
+    let req = Request::builder().uri(format!("/api/shares/{s1}")).body(Body::empty()).unwrap();
+    let res = app2.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body_string(res.into_body()).await).unwrap();
+    assert_eq!(v["encrypted_payload"].as_str(), Some("p1"));
+    assert_eq!(v["kdf_salt"].as_str(), Some("c2FsdA=="));
+
+    // created_at preserved (query the destination DB directly; CAST for sqlx Any).
+    let row: (String,) = sqlx::query_as("SELECT CAST(created_at AS TEXT) FROM shares WHERE slug = $1")
+        .bind(&s1)
+        .fetch_one(&state2.db)
+        .await
+        .unwrap();
+    assert_eq!(row.0, orig_created_at);
+
+    // Ownership: imported rows belong to bob, not a copied user_id.
+    let bob_id: (i64,) = sqlx::query_as("SELECT id FROM users WHERE username = $1")
+        .bind("rt_bob")
+        .fetch_one(&state2.db)
+        .await
+        .unwrap();
+    let owner: (i64,) = sqlx::query_as("SELECT user_id FROM shares WHERE slug = $1")
+        .bind(&s2)
+        .fetch_one(&state2.db)
+        .await
+        .unwrap();
+    assert_eq!(owner.0, bob_id.0);
+
+    // Idempotent re-import: nothing new, both skipped.
+    let summary2 = import_envelope(&app2, &bob, &envelope_json).await;
+    assert_eq!(summary2["imported"].as_u64(), Some(0));
+    assert_eq!(summary2["skipped"].as_u64(), Some(2));
+}
+
+#[tokio::test]
+async fn test_import_rejects_bad_version() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "ver_user").await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares/import")
+        .header("content-type", "application/json")
+        .header("cookie", cookie.to_str().unwrap())
+        .body(Body::from(r#"{"version":2,"shares":[]}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_import_counts_malformed_entry_as_error_without_aborting() {
+    let (app, state) = make_app().await;
+    let cookie = register_and_login(&app, &state, "mal_user").await;
+
+    let envelope = r#"{"version":1,"shares":[
+        {"slug":"goodslug0001","encrypted_payload":"ok","kdf_salt":null,"created_at":"2026-06-10 09:30:00"},
+        {"slug":"badslug00001","encrypted_payload":"","kdf_salt":null,"created_at":"2026-06-10 09:31:00"}
+    ]}"#;
+    let summary = import_envelope(&app, &cookie, envelope).await;
+    assert_eq!(summary["imported"].as_u64(), Some(1));
+    assert_eq!(summary["errors"].as_u64(), Some(1));
+
+    let req = Request::builder().uri("/api/shares/goodslug0001").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let req = Request::builder().uri("/api/shares/badslug00001").body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_import_requires_auth() {
+    let (app, _state) = make_app().await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/shares/import")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"version":1,"shares":[]}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
