@@ -43,11 +43,13 @@
 </div>
 
 <script src="/static/crypto.js"></script>
+<script src="/static/ui.js"></script>
 <script>
     const slug = window.location.pathname.split('/').filter(Boolean).pop();
     let currentPayload = null;
-    let currentMode = null;   // 'link' | 'password'
-    let currentKey = null;    // rawKeyB64 when link mode
+    let currentMode = null;       // 'link' | 'password'
+    let currentKey = null;        // rawKeyB64 when link mode
+    let currentPassword = null;   // 密码模式下解锁/保存时用过的查看密码（仅内存）
     let isOwner = false;
 
     function showError(msg) {
@@ -149,7 +151,8 @@
         } else {
             fields.forEach(f => addEditFieldRow(f.label, f.value));
         }
-        document.getElementById('edit-view-password').value = '';
+        document.getElementById('edit-view-password').value =
+            currentMode === 'password' ? (currentPassword || '') : '';
         document.getElementById('edit-form').style.display = 'block';
     }
 
@@ -183,10 +186,12 @@
             if (passwordProtected) {
                 currentMode = 'password';
                 currentKey = null;
+                currentPassword = password;
                 history.replaceState(null, '', `/s/${slug}`);
             } else {
                 currentMode = 'link';
                 currentKey = key;
+                currentPassword = null;
                 history.replaceState(null, '', `/s/${slug}#key=${key}`);
             }
 
@@ -215,6 +220,10 @@
         });
     });
 
+    // 给两处密码输入框加显示/隐藏切换
+    attachPasswordToggle(document.getElementById('view-password'));
+    attachPasswordToggle(document.getElementById('edit-view-password'));
+
     (async () => {
         let data;
         try {
@@ -240,6 +249,7 @@
                     const payload = await decryptWithKey(cryptoKey, data.encrypted_payload);
                     currentMode = 'password';
                     currentKey = null;
+                    currentPassword = password;
                     renderPayload(payload);
                 } catch (e) {
                     document.getElementById('password-error').style.display = 'block';
