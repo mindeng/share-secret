@@ -8,9 +8,26 @@
 <p style="color: red;">{{ error }}</p>
 {% endif %}
 <form method="post" action="/register">
-    <label>用户名 <input type="text" name="username" required></label>
+    <label>用户名 <input type="text" name="username" id="username" required></label>
     <label>密码 <input type="password" name="password" required></label>
+    <label>验证码 <input type="text" name="code" id="code" inputmode="numeric" required></label>
+    <button type="button" id="get-code">获取验证码</button>
+    <p id="code-msg"></p>
     <button type="submit">注册</button>
 </form>
 <p>已有账号？<a href="/login">登录</a></p>
+<script>
+document.getElementById('get-code').addEventListener('click', async function () {
+    var username = document.getElementById('username').value;
+    var msg = document.getElementById('code-msg');
+    var res = await fetch('/register/code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username: username }),
+    });
+    var data = await res.json();
+    msg.style.color = data.ok ? 'green' : 'red';
+    msg.textContent = data.message;
+});
+</script>
 {% endblock %}
