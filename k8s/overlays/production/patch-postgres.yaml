@@ -1,0 +1,28 @@
+# production：连接外部 Postgres。
+# - DATABASE_URL 改为从 Secret share-secret-db 注入（value: null 删除 base 的内联 sqlite 值）
+# - 删除 /data 卷与挂载（外部 DB 不再需要本地盘）
+# - 策略由 base 的 Recreate 改为 RollingUpdate（不再有 PVC 单写争用）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: share-secret
+spec:
+  strategy:
+    type: RollingUpdate
+  template:
+    spec:
+      containers:
+        - name: share-secret
+          env:
+            - name: DATABASE_URL
+              value: null
+              valueFrom:
+                secretKeyRef:
+                  name: share-secret-db
+                  key: DATABASE_URL
+          volumeMounts:
+            - name: data
+              $patch: delete
+      volumes:
+        - name: data
+          $patch: delete

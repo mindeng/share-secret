@@ -14,3 +14,7 @@ images:
 - name: share-secret
   newName: ghcr.io/mindeng/share-secret
   newTag: sha-78b2146
+
+patches:
+- path: patch-postgres.yaml
+- path: patch-drop-pvc.yaml
